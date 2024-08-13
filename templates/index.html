@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Users</title>
+</head>
+<body>
+    <h1>User Management</h1>
+    <a href="/users/create">Create New Item</a>
+    <ul>
+        {{range .}}
+        <li>
+            <strong>{{.Name}}</strong>: {{.SlackID}} - ${{.Email}}
+            <a href="/users/update/{{.ID}}">Edit</a>
+            <form action="/users/delete/{{.ID}}" method="POST" style="display:inline;">
+                <button type="submit">Delete</button>
+            </form>
+        </li>
+        {{end}}
+    </ul>
+</body>
+</html>

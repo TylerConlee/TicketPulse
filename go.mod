@@ -1,4 +1,4 @@
-module supportpulse
+module ticketpulse
 
 go 1.21.1
 

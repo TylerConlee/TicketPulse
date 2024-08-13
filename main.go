@@ -2,7 +2,8 @@ package main
 
 import (
 	"log"
-	"ticketpulse/models"
+
+	"github.com/TylerConlee/TicketPulse/models"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"

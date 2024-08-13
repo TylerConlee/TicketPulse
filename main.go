@@ -1,27 +1,23 @@
 package main
 
 import (
-	"log"
-	"text/template"
+	"net/http"
 
-	"github.com/TylerConlee/TicketPulse/models"
+	"github.com/tylerconlee/ticketpulse/db"
+	"github.com/tylerconlee/ticketpulse/handlers"
 
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
+	"github.com/gorilla/mux"
 )
 
-var db *gorm.DB
-var err error
-var templates *template.Template
-
-func init() {
-	db, err = gorm.Open(sqlite.Open("ticketpulse.db"), &gorm.Config{})
-	if err != nil {
-		log.Panic(err)
-	}
-	db.AutoMigrate(&models.User{})
-}
-
 func main() {
-	StartServer()
+	db.InitDB("users.db")
+
+	r := mux.NewRouter()
+	r.HandleFunc("/", handlers.HomeHandler).Methods("GET")
+	r.HandleFunc("/auth/google/login", handlers.GoogleLoginHandler).Methods("GET")
+	r.HandleFunc("/auth/google/callback", handlers.GoogleCallbackHandler).Methods("GET")
+
+	// Add additional routes for CRUD operations and configuration...
+
+	http.ListenAndServe(":8080", r)
 }

@@ -1,0 +1,18 @@
+{{define "content"}}
+<h1>Edit User</h1>
+<form method="POST" action="/admin/users/edit/{{.EditUser.ID}}">
+    <label for="name">Name:</label>
+    <input type="text" name="name" id="name" value="{{.EditUser.Name}}" required><br>
+
+    <label for="role">Role:</label>
+    <select name="role" id="role">
+        <option value="agent" {{if eq .EditUser.Role "agent"}}selected{{end}}>Agent</option>
+        <option value="admin" {{if eq .EditUser.Role "admin"}}selected{{end}}>Admin</option>
+    </select><br>
+
+    <label for="daily_summary">Daily Summary:</label>
+    <input type="checkbox" name="daily_summary" id="daily_summary" {{if .EditUser.DailySummary}}checked{{end}}><br>
+
+    <button type="submit">Save</button>
+</form>
+{{end}}

@@ -1,0 +1,21 @@
+{{define "content"}}
+<h1>Create New User</h1>
+<form method="POST" action="/admin/users/new">
+    <label for="email">Email:</label>
+    <input type="email" name="email" id="email" required><br>
+
+    <label for="name">Name:</label>
+    <input type="text" name="name" id="name" required><br>
+
+    <label for="role">Role:</label>
+    <select name="role" id="role">
+        <option value="agent">Agent</option>
+        <option value="admin">Admin</option>
+    </select><br>
+
+    <label for="daily_summary">Daily Summary:</label>
+    <input type="checkbox" name="daily_summary" id="daily_summary"><br>
+
+    <button type="submit">Create User</button>
+</form>
+{{end}}

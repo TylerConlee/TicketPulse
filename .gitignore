@@ -1,2 +1,3 @@
 ./TicketPulse
-ticketpulse.db
+users.db
+.env

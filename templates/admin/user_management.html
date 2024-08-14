@@ -1,0 +1,25 @@
+{{define "content"}}
+<h1>User Management</h1>
+<a href="/admin/users/new">
+    <button>Create New User</button>
+</a>
+
+<table border="1">
+    <tr>
+        <th>Email</th>
+        <th>Name</th>
+        <th>Role</th>
+        <th>Daily Summary</th>
+        <th>Edit</th>
+    </tr>
+    {{range .Users}}
+    <tr>
+        <td>{{.Email}}</td>
+        <td>{{.Name}}</td>
+        <td>{{.Role}}</td>
+        <td>{{if .DailySummary}}Yes{{else}}No{{end}}</td>
+        <td><a href="/admin/users/edit/{{.ID}}">Edit</a></td>
+    </tr>
+    {{end}}
+</table>
+{{end}}

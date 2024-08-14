@@ -17,14 +17,15 @@ func InitDB(filepath string) {
 	}
 
 	createUserTableSQL := `CREATE TABLE IF NOT EXISTS users (
-		"id" INTEGER PRIMARY KEY AUTOINCREMENT,
-		"email" TEXT UNIQUE,
-		"name" TEXT,
-		"role" TEXT,
-		"sso_provider" TEXT,
-		"notification_tags" TEXT,
-		"daily_summary" BOOLEAN
-	);`
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE,
+    name TEXT,
+    role TEXT,
+    sso_provider TEXT,
+    notification_tags TEXT,  -- This is where the serialized JSON will be stored
+    daily_summary BOOLEAN
+);
+`
 	_, err = Database.Exec(createUserTableSQL)
 	if err != nil {
 		log.Fatal(err)

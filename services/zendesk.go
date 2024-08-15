@@ -163,7 +163,7 @@ func (zc *ZendeskClient) SearchNewOrUpdatedTickets(since time.Time) ([]zendesk.T
 	return allTickets, nil
 }
 
-func StartZendeskPolling(sseServer *middlewares.SSEServer) {
+func StartZendeskPolling(sseServer *middlewares.SSEServer, slackService *SlackService) {
 	var lastPollTime = time.Now().Add(-5 * time.Minute) // Start 5 minutes before now
 
 	for {
@@ -195,7 +195,7 @@ func StartZendeskPolling(sseServer *middlewares.SSEServer) {
 		if len(allTickets) == 0 {
 			log.Println("No tickets to process")
 		} else {
-			processTickets(allTickets, slaData, sseServer)
+			processTickets(allTickets, slaData, sseServer, slackService)
 		}
 
 		lastPollTime = time.Now()
@@ -222,7 +222,7 @@ func getZendeskConfig() (string, string, string, error) {
 
 	return subdomain, email, apiKey, nil
 }
-func processTickets(tickets []zendesk.Ticket, slaData map[int64]SLAInfo, sseServer *middlewares.SSEServer) {
+func processTickets(tickets []zendesk.Ticket, slaData map[int64]SLAInfo, sseServer *middlewares.SSEServer, slackService *SlackService) {
 
 	for _, ticket := range tickets {
 		userAlerts, err := models.GetAllTagAlerts()
@@ -233,21 +233,36 @@ func processTickets(tickets []zendesk.Ticket, slaData map[int64]SLAInfo, sseServ
 
 		for _, alert := range userAlerts {
 			if tagMatches(alert.Tag, ticket.Tags) {
+				var alertMessage string
+				var sendAlert bool
+
 				switch alert.AlertType {
 				case "new_ticket":
 					if isNewTicket(ticket) {
-						logAlert(alert, ticket, "New Ticket Alert")
+						alertMessage = fmt.Sprintf("New Ticket Alert: Ticket #%d (%s) matches tag '%s'", ticket.ID, ticket.Subject, alert.Tag)
+						sendAlert = true
 					}
 				case "ticket_update":
 					if isUpdatedTicket(ticket) {
-						logAlert(alert, ticket, "Ticket Update Alert")
+						alertMessage = fmt.Sprintf("Ticket Update Alert: Ticket #%d (%s) matches tag '%s'", ticket.ID, ticket.Subject, alert.Tag)
+						sendAlert = true
 					}
 				case "sla_deadline":
-					// Fetch SLA metrics from the ticket
 					if slaInfo, ok := slaData[ticket.ID]; ok {
 						if label, matches := slaConditionMatches(slaInfo.PolicyMetrics); matches {
-							logAlert(alert, ticket, label)
+							alertMessage = fmt.Sprintf("SLA Deadline Alert: %s for Ticket #%d (%s) matches tag '%s'", label, ticket.ID, ticket.Subject, alert.Tag)
+							sendAlert = true
 						}
+					}
+				}
+
+				if sendAlert {
+					logAlert(alert, ticket, alert.AlertType)
+
+					// Send Slack message
+					err := slackService.SendMessage(alert.SlackChannelID, alertMessage)
+					if err != nil {
+						fmt.Printf("Failed to send Slack message for Ticket #%d: %v\n", ticket.ID, err)
 					}
 				}
 			}

@@ -11,11 +11,12 @@
 
         <div class="mb-3">
             <label for="slack_channel" class="form-label">Slack Channel</label>
-            <select class="form-select" id="slack_channel" name="slack_channel" required>
+            <select name="slack_channel" id="slack_channel" required>
                 {{range .SlackChannels}}
                 <option value="{{.ID}}">{{.Name}}</option>
                 {{end}}
             </select>
+            
         </div>
 
         <div class="mb-3">

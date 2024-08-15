@@ -18,6 +18,12 @@ import (
 
 var sseServer = middlewares.NewSSEServer()
 
+type Services struct {
+	SlackService *services.SlackService
+}
+
+var Service *Services
+
 func main() {
 	// Initialize the application
 	initDatabase()
@@ -30,13 +36,17 @@ func main() {
 	r.Handle("/events", sseServer)
 
 	// Use a Go channel to control when to start polling
-	startPollingChan := make(chan struct{})
+	startZenPollingChan := make(chan struct{})
+
+	startSlackPollingChan := make(chan struct{})
 
 	// Periodically check configuration and start polling when ready
-	go checkConfigAndStartPolling(startPollingChan)
+	go checkZenPolling(startZenPollingChan)
+
+	go checkSlackPolling(startSlackPollingChan)
 
 	// Start the HTTP server
-	startServer(r, sseServer, startPollingChan)
+	startServer(r, sseServer, startZenPollingChan, startSlackPollingChan)
 }
 
 func initDatabase() {
@@ -56,9 +66,9 @@ func envCheck() {
 	}
 }
 
-func checkConfigAndStartPolling(startPollingChan chan struct{}) {
+func checkZenPolling(startPollingChan chan struct{}) {
 	for {
-		if configComplete() {
+		if checkZendeskConfig() {
 			close(startPollingChan)
 			log.Println("Polling channel closed, starting Zendesk polling")
 
@@ -69,14 +79,40 @@ func checkConfigAndStartPolling(startPollingChan chan struct{}) {
 	}
 }
 
-func configComplete() bool {
-	requiredConfigs := []string{"zendesk_subdomain", "zendesk_email", "zendesk_api_key", "slack_signing_secret"}
+func checkSlackPolling(startPollingChan chan struct{}) {
+	for {
+		err := checkSlackConfig()
+		if err == nil { // Only close the channel when config is complete and valid
+			close(startPollingChan)
+			log.Println("Polling channel closed, starting Slack polling")
+			break
+		}
+		log.Println("Waiting for complete Slack configuration...")
+		time.Sleep(30 * time.Second)
+	}
+}
+
+func checkZendeskConfig() bool {
+	requiredConfigs := []string{"zendesk_subdomain", "zendesk_email", "zendesk_api_key"}
 	for _, key := range requiredConfigs {
 		if value, err := models.GetConfiguration(key); err != nil || value == "" {
 			return false
 		}
 	}
 	return true
+}
+func checkSlackConfig() error {
+	botToken, err := models.GetConfiguration("slack_bot_token")
+	if err != nil || botToken == "" {
+		return fmt.Errorf("Slack bot token is missing")
+	}
+
+	appToken, err := models.GetConfiguration("slack_app_token")
+	if err != nil || appToken == "" {
+		return fmt.Errorf("Slack app token is missing")
+	}
+
+	return nil
 }
 
 func setupRouter() *mux.Router {
@@ -114,9 +150,15 @@ func setupProtectedRoutes(r *mux.Router) *mux.Router {
 	protected.Use(middlewares.NotificationMiddleware)
 
 	protected.HandleFunc("/dashboard", handlers.DashboardHandler).Methods("GET")
-	protected.HandleFunc("/profile", handlers.ProfileHandler).Methods("GET", "POST")
-	protected.HandleFunc("/profile/add-tag", handlers.ProfileHandler).Methods("POST")
-	protected.HandleFunc("/profile/delete-tag/{id}", handlers.ProfileHandler).Methods("POST")
+	protected.HandleFunc("/profile", func(w http.ResponseWriter, r *http.Request) {
+		handlers.ProfileHandler(w, r, Service.SlackService)
+	}).Methods("GET", "POST")
+	protected.HandleFunc("/profile/add-tag", func(w http.ResponseWriter, r *http.Request) {
+		handlers.ProfileHandler(w, r, Service.SlackService)
+	}).Methods("POST")
+	protected.HandleFunc("/profile/delete-tag/{id}", func(w http.ResponseWriter, r *http.Request) {
+		handlers.ProfileHandler(w, r, Service.SlackService)
+	}).Methods("POST")
 	protected.HandleFunc("/settings", handlers.SettingsHandler).Methods("GET", "POST")
 	protected.HandleFunc("/logout", handlers.LogoutHandler).Methods("GET")
 
@@ -136,14 +178,23 @@ func setupAdminRoutes(protected *mux.Router) {
 	admin.HandleFunc("/configuration", handlers.ConfigurationHandler).Methods("GET", "POST")
 }
 
-func startServer(r *mux.Router, sseServer *middlewares.SSEServer, startPollingChan chan struct{}) {
-	// Notify and start polling if the configuration is complete
+func startServer(r *mux.Router, sseServer *middlewares.SSEServer, startZenPollingChan, startSlackPollingChan chan struct{}) {
+	// Wait for both polling channels to close
 	go func() {
-		<-startPollingChan
-		time.Sleep(10 * time.Second) // Give the server time to start before polling
-		fmt.Println("Zendesk configuration polling has started.")
+		<-startSlackPollingChan
+		<-startZenPollingChan
 
-		services.StartZendeskPolling(sseServer) // Start polling once the channel is closed
+		// Initialize SlackService
+		slackService, err := services.NewSlackService()
+		if err != nil {
+			log.Fatalf("Failed to initialize Slack service: %v", err)
+		}
+
+		// Start Zendesk polling with the SlackService
+		go services.StartZendeskPolling(sseServer, slackService)
+
+		// Start Slack Socket Mode
+		go slackService.StartSocketMode()
 	}()
 
 	fmt.Println("Starting server on :8080...")

@@ -36,8 +36,8 @@ func ConfigurationHandler(w http.ResponseWriter, r *http.Request) {
 func saveConfigurationSettings(r *http.Request) error {
 	configs := map[string]string{
 		"daily_summary_enabled": r.FormValue("daily_summary_enabled"),
-		"slack_api_token":       r.FormValue("slack_api_token"),
-		"slack_signing_secret":  r.FormValue("slack_signing_secret"),
+		"slack_app_token":       r.FormValue("slack_app_token"),
+		"slack_bot_token":       r.FormValue("slack_bot_token"),
 		"zendesk_api_key":       r.FormValue("zendesk_api_key"),
 		"zendesk_subdomain":     r.FormValue("zendesk_subdomain"),
 		"zendesk_email":         r.FormValue("zendesk_email"), // New entry

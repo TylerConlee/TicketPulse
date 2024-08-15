@@ -37,14 +37,12 @@ func UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
 		name := r.FormValue("name")
 		role := models.Role(r.FormValue("role"))
-		sso_provider := r.FormValue("ssoprovider")
 		email := r.FormValue("email")
 		user := models.User{
-			ID:          id,
-			Name:        name,
-			Role:        role,
-			SSOProvider: sso_provider,
-			Email:       email,
+			ID:    id,
+			Name:  name,
+			Role:  role,
+			Email: email,
 		}
 		models.UpdateUser(user)
 		http.Redirect(w, r, "/", http.StatusSeeOther)

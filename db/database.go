@@ -21,13 +21,27 @@ func InitDB(filepath string) {
     email TEXT UNIQUE,
     name TEXT,
     role TEXT,
-    sso_provider TEXT,
-    notification_tags TEXT,  -- This is where the serialized JSON will be stored
-    daily_summary BOOLEAN
+    daily_summary BOOLEAN,
+	selected_tags TEXT
 );
 `
+	createTagsTableSQL := `CREATE TABLE IF NOT EXISTS user_tag_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    tag TEXT NOT NULL,
+    slack_channel_id TEXT NOT NULL,
+    alert_type TEXT NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);`
+
 	_, err = Database.Exec(createUserTableSQL)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	_, err = Database.Exec(createTagsTableSQL)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 }

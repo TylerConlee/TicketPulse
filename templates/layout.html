@@ -15,6 +15,7 @@
                 <li><a href="/settings">Settings</a></li>
                 {{if eq .User.Role "admin"}}
                 <li><a href="/admin/users">User Management</a></li>
+                <li><a href="/admin/tags">Tag Management</a></li>
                 <!-- Add other admin-related links here -->
                 {{end}}
                 <li><a href="/logout">Logout</a></li>
@@ -23,7 +24,7 @@
     </header>
     
     <main>
-        {{template "content" .}}
+        {{block "content" .}} {{end}}
     </main>
 
     <footer>

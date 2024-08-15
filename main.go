@@ -37,7 +37,10 @@ func main() {
 	protected := r.PathPrefix("/").Subrouter()
 	protected.Use(handlers.AuthMiddleware)
 	protected.HandleFunc("/dashboard", handlers.DashboardHandler).Methods("GET")
-	//protected.HandleFunc("/profile", handlers.ProfileHandler).Methods("GET")
+	protected.HandleFunc("/profile", handlers.ProfileHandler).Methods("GET", "POST")
+	protected.HandleFunc("/profile/add-tag", handlers.ProfileHandler).Methods("POST")
+	protected.HandleFunc("/profile/delete-tag/{id}", handlers.ProfileHandler).Methods("POST")
+
 	protected.HandleFunc("/settings", handlers.SettingsHandler).Methods("GET", "POST")
 	protected.HandleFunc("/logout", handlers.LogoutHandler).Methods("GET")
 
@@ -46,7 +49,10 @@ func main() {
 	admin.Use(handlers.AdminMiddleware)
 	admin.HandleFunc("/users", handlers.UserManagementHandler).Methods("GET")
 	admin.HandleFunc("/users/edit/{id}", handlers.EditUserHandler).Methods("GET", "POST")
+	admin.HandleFunc("/users/delete/{id}", handlers.DeleteUserHandler).Methods("POST")
 	admin.HandleFunc("/users/new", handlers.NewUserHandler).Methods("GET", "POST")
+	admin.HandleFunc("/tags", handlers.TagManagementHandler).Methods("GET")
+	admin.HandleFunc("/tag/delete/{id}", handlers.DeleteTagAlertHandler).Methods("POST")
 
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("static/"))))
 

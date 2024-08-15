@@ -1,5 +1,6 @@
 {{define "content"}}
 <h1>User Management</h1>
+
 <a href="/admin/users/new">
     <button>Create New User</button>
 </a>
@@ -11,6 +12,7 @@
         <th>Role</th>
         <th>Daily Summary</th>
         <th>Edit</th>
+        <th>Delete</th>
     </tr>
     {{range .Users}}
     <tr>
@@ -19,7 +21,24 @@
         <td>{{.Role}}</td>
         <td>{{if .DailySummary}}Yes{{else}}No{{end}}</td>
         <td><a href="/admin/users/edit/{{.ID}}">Edit</a></td>
+        <td>
+            {{if and (ne .ID $.CurrentUserID) (ne .ID $.FirstUserID)}}
+            <form method="POST" action="/admin/users/delete/{{.ID}}" onsubmit="return confirm('Are you sure you want to delete this user?');">
+                <button type="submit">Delete</button>
+            </form>
+            {{else}}
+            <button disabled>Delete</button>
+            {{end}}
+        </td>
+    </tr>
+    {{else}}
+    <tr>
+        <td colspan="6">No users found.</td>
     </tr>
     {{end}}
 </table>
+
+<!-- Debugging: Add a count of users displayed -->
+<p>Total users: {{len .Users}}</p>
+
 {{end}}

@@ -7,30 +7,51 @@ import (
 	"strconv"
 
 	"github.com/TylerConlee/TicketPulse/models"
-
 	"github.com/gorilla/mux"
 )
+
+func renderAdminTemplate(w http.ResponseWriter, tmpl string, data interface{}) {
+	t := template.Must(template.ParseFiles("templates/layout.html", tmpl))
+	err := t.ExecuteTemplate(w, "layout.html", data)
+	if err != nil {
+		log.Println("Error rendering template:", err)
+		http.Error(w, "Error rendering template", http.StatusInternalServerError)
+	}
+}
+
+func getCommonData(r *http.Request, title string) (map[string]interface{}, error) {
+	user := getCurrentUser(r)
+	firstUserID, err := models.GetFirstUserID()
+	if err != nil {
+		return nil, err
+	}
+
+	data := map[string]interface{}{
+		"Title":       title,
+		"User":        user,
+		"FirstUserID": firstUserID,
+	}
+
+	return data, nil
+}
 
 func UserManagementHandler(w http.ResponseWriter, r *http.Request) {
 	users, err := models.GetAllUsers()
 	if err != nil {
 		http.Error(w, "Unable to retrieve users", http.StatusInternalServerError)
-		log.Println("Error retrieving users:", err)
 		return
 	}
 
-	data := struct {
-		Title string
-		User  models.User
-		Users []models.User
-	}{
-		Title: "User Management",
-		User:  getCurrentUser(r), // Function to get the current logged-in user
-		Users: users,
+	data, err := getCommonData(r, "User Management")
+	if err != nil {
+		http.Error(w, "Unable to retrieve common data", http.StatusInternalServerError)
+		return
 	}
 
-	t := template.Must(template.ParseFiles("templates/layout.html", "templates/admin/user_management.html"))
-	t.ExecuteTemplate(w, "layout.html", data)
+	data["Users"] = users
+	data["CurrentUserID"] = data["User"].(models.User).ID
+
+	renderAdminTemplate(w, "templates/admin/user_management.html", data)
 }
 
 func EditUserHandler(w http.ResponseWriter, r *http.Request) {
@@ -40,64 +61,85 @@ func EditUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.Method == "POST" {
+		handleEditUserPost(w, r, userID)
+		return
+	}
+
 	user, err := models.GetUserByID(userID)
 	if err != nil {
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
 	}
 
-	if r.Method == "POST" {
-		user.Name = r.FormValue("name")
-		user.Role = models.Role(r.FormValue("role"))
-		user.DailySummary = r.FormValue("daily_summary") == "on"
-
-		err = models.UpdateUser(user)
-		if err != nil {
-			http.Error(w, "Unable to update user", http.StatusInternalServerError)
-			return
-		}
-
-		http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
+	data, err := getCommonData(r, "Edit User")
+	if err != nil {
+		http.Error(w, "Unable to retrieve common data", http.StatusInternalServerError)
 		return
 	}
 
-	session, _ := store.Get(r, "session-name")
-	currentUserID := session.Values["user_id"].(int)
-	currentUser, _ := models.GetUserByID(currentUserID)
+	data["EditUser"] = user
 
-	data := struct {
-		Title    string
-		User     models.User
-		EditUser models.User
-	}{
-		Title:    "Edit User",
-		User:     currentUser,
-		EditUser: user,
+	renderAdminTemplate(w, "templates/admin/edit_user.html", data)
+}
+
+func handleEditUserPost(w http.ResponseWriter, r *http.Request, userID int) {
+	user, err := models.GetUserByID(userID)
+	if err != nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
 	}
-	log.Println("Rendering Edit User Page for user ID:", userID)
-	log.Printf("Data: %+v\n", data)
-	// This explicitly selects the "content" block from "user_management.html"
-	t := template.Must(template.ParseFiles("templates/layout.html", "templates/admin/edit_user.html"))
-	t.ExecuteTemplate(w, "layout.html", data)
 
+	user.Name = r.FormValue("name")
+	user.Role = models.Role(r.FormValue("role"))
+	user.DailySummary = r.FormValue("daily_summary") == "on"
+
+	err = models.UpdateUser(user)
+	if err != nil {
+		http.Error(w, "Unable to update user", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
+}
+
+func DeleteUserHandler(w http.ResponseWriter, r *http.Request) {
+	userID, err := strconv.Atoi(mux.Vars(r)["id"])
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	currentUser := getCurrentUser(r)
+	firstUserID, err := models.GetFirstUserID()
+	if err != nil {
+		http.Error(w, "Unable to retrieve first user ID", http.StatusInternalServerError)
+		return
+	}
+
+	if userID == currentUser.ID || userID == firstUserID {
+		http.Error(w, "You cannot delete this user.", http.StatusForbidden)
+		return
+	}
+
+	err = models.DeleteUserByID(userID)
+	if err != nil {
+		http.Error(w, "Unable to delete user", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
 }
 
 func NewUserHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
-		session, _ := store.Get(r, "session-name")
-		userID := session.Values["user_id"].(int)
-		currentUser, _ := models.GetUserByID(userID)
-
-		data := struct {
-			Title string
-			User  models.User
-		}{
-			Title: "Create New User",
-			User:  currentUser,
+		data, err := getCommonData(r, "Create New User")
+		if err != nil {
+			http.Error(w, "Unable to retrieve common data", http.StatusInternalServerError)
+			return
 		}
 
-		t := template.Must(template.ParseFiles("templates/layout.html", "templates/admin/new_user.html"))
-		t.ExecuteTemplate(w, "layout.html", data)
+		renderAdminTemplate(w, "templates/admin/new_user.html", data)
 		return
 	}
 
@@ -109,12 +151,47 @@ func NewUserHandler(w http.ResponseWriter, r *http.Request) {
 
 		err := models.CreateUser(email, name, role, dailySummary)
 		if err != nil {
+			log.Println("Error creating user:", err)
 			http.Error(w, "Unable to create user", http.StatusInternalServerError)
 			return
 		}
 
 		http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
 	}
+}
+
+func TagManagementHandler(w http.ResponseWriter, r *http.Request) {
+	tagAlerts, err := models.GetAllTagAlerts()
+	if err != nil {
+		http.Error(w, "Unable to retrieve tag alerts", http.StatusInternalServerError)
+		return
+	}
+
+	data, err := getCommonData(r, "Tag Management")
+	if err != nil {
+		http.Error(w, "Unable to retrieve common data", http.StatusInternalServerError)
+		return
+	}
+
+	data["TagAlerts"] = tagAlerts
+
+	renderAdminTemplate(w, "templates/admin/tag_management.html", data)
+}
+
+func DeleteTagAlertHandler(w http.ResponseWriter, r *http.Request) {
+	alertID, err := strconv.Atoi(mux.Vars(r)["id"])
+	if err != nil {
+		http.Error(w, "Invalid tag alert ID", http.StatusBadRequest)
+		return
+	}
+
+	err = models.DeleteTagAlert(alertID)
+	if err != nil {
+		http.Error(w, "Unable to delete tag alert", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/admin/tags", http.StatusSeeOther)
 }
 
 func getCurrentUser(r *http.Request) models.User {

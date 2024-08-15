@@ -10,7 +10,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
-func renderAdminTemplate(w http.ResponseWriter, tmpl string, data interface{}) {
+func renderTemplate(w http.ResponseWriter, tmpl string, data interface{}) {
 	t := template.Must(template.ParseFiles("templates/layout.html", tmpl))
 	err := t.ExecuteTemplate(w, "layout.html", data)
 	if err != nil {
@@ -19,23 +19,8 @@ func renderAdminTemplate(w http.ResponseWriter, tmpl string, data interface{}) {
 	}
 }
 
-func getCommonData(r *http.Request, title string) (map[string]interface{}, error) {
-	user := getCurrentUser(r)
-	firstUserID, err := models.GetFirstUserID()
-	if err != nil {
-		return nil, err
-	}
-
-	data := map[string]interface{}{
-		"Title":       title,
-		"User":        user,
-		"FirstUserID": firstUserID,
-	}
-
-	return data, nil
-}
-
 func UserManagementHandler(w http.ResponseWriter, r *http.Request) {
+
 	users, err := models.GetAllUsers()
 	if err != nil {
 		http.Error(w, "Unable to retrieve users", http.StatusInternalServerError)
@@ -51,7 +36,7 @@ func UserManagementHandler(w http.ResponseWriter, r *http.Request) {
 	data["Users"] = users
 	data["CurrentUserID"] = data["User"].(models.User).ID
 
-	renderAdminTemplate(w, "templates/admin/user_management.html", data)
+	renderTemplate(w, "templates/admin/user_management.html", data)
 }
 
 func EditUserHandler(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +65,7 @@ func EditUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	data["EditUser"] = user
 
-	renderAdminTemplate(w, "templates/admin/edit_user.html", data)
+	renderTemplate(w, "templates/admin/edit_user.html", data)
 }
 
 func handleEditUserPost(w http.ResponseWriter, r *http.Request, userID int) {
@@ -139,7 +124,7 @@ func NewUserHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		renderAdminTemplate(w, "templates/admin/new_user.html", data)
+		renderTemplate(w, "templates/admin/new_user.html", data)
 		return
 	}
 
@@ -175,7 +160,7 @@ func TagManagementHandler(w http.ResponseWriter, r *http.Request) {
 
 	data["TagAlerts"] = tagAlerts
 
-	renderAdminTemplate(w, "templates/admin/tag_management.html", data)
+	renderTemplate(w, "templates/admin/tag_management.html", data)
 }
 
 func DeleteTagAlertHandler(w http.ResponseWriter, r *http.Request) {

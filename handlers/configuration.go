@@ -23,18 +23,14 @@ func ConfigurationHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unable to load configuration", http.StatusInternalServerError)
 		return
 	}
-	user := getCurrentUser(r)
-	data := struct {
-		Title   string
-		Configs map[string]string
-		User    models.User
-	}{
-		Title:   "Application Configuration",
-		Configs: configs,
-		User:    user,
+	data, err := getCommonData(r, "Application Configuration")
+	if err != nil {
+		http.Error(w, "Unable to retrieve common data", http.StatusInternalServerError)
+		return
 	}
+	data["Configs"] = configs
 
-	renderAdminTemplate(w, "templates/admin/configuration.html", data)
+	renderTemplate(w, "templates/admin/configuration.html", data)
 }
 
 func saveConfigurationSettings(r *http.Request) error {

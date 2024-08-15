@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/TylerConlee/TicketPulse/middlewares"
 	"github.com/TylerConlee/TicketPulse/models"
 
 	"github.com/gorilla/mux"
@@ -66,4 +67,23 @@ func LogoutHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+func getCommonData(r *http.Request, title string) (map[string]interface{}, error) {
+	user := getCurrentUser(r)
+	firstUserID, err := models.GetFirstUserID()
+	if err != nil {
+		return nil, err
+	}
+	// Retrieve the notifications from the context
+	notifications := middlewares.GetNotificationsFromContext(r)
+
+	data := map[string]interface{}{
+		"Title":         title,
+		"User":          user,
+		"FirstUserID":   firstUserID,
+		"Notifications": notifications,
+	}
+
+	return data, nil
 }

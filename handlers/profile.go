@@ -14,7 +14,6 @@ import (
 func ProfileHandler(w http.ResponseWriter, r *http.Request) {
 	session, _ := store.Get(r, "session-name")
 	userID := session.Values["user_id"].(int)
-	currentUser, _ := models.GetUserByID(userID)
 
 	// Handle adding a new tag alert
 	if r.Method == "POST" && r.URL.Path == "/profile/add-tag" {
@@ -55,21 +54,13 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request) {
 		{"C01", "#general"},
 		{"C02", "#alerts"},
 	}
-
-	data := struct {
-		Title         string
-		User          models.User
-		TagAlerts     []models.TagAlert
-		SlackChannels []struct {
-			ID   string
-			Name string
-		}
-	}{
-		Title:         "Profile",
-		User:          currentUser,
-		TagAlerts:     tagAlerts,
-		SlackChannels: slackChannels,
+	data, err := getCommonData(r, "Profile")
+	if err != nil {
+		http.Error(w, "Unable to retrieve common data", http.StatusInternalServerError)
+		return
 	}
+	data["SlackChannels"] = slackChannels
+	data["TagAlerts"] = tagAlerts
 
 	t := template.Must(template.ParseFiles("templates/layout.html", "templates/profile.html"))
 	t.ExecuteTemplate(w, "layout.html", data)

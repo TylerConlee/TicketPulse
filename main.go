@@ -53,6 +53,7 @@ func main() {
 	admin.HandleFunc("/users/new", handlers.NewUserHandler).Methods("GET", "POST")
 	admin.HandleFunc("/tags", handlers.TagManagementHandler).Methods("GET")
 	admin.HandleFunc("/tag/delete/{id}", handlers.DeleteTagAlertHandler).Methods("POST")
+	admin.HandleFunc("/configuration", handlers.ConfigurationHandler).Methods("GET", "POST")
 
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("static/"))))
 

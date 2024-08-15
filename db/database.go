@@ -34,6 +34,13 @@ func InitDB(filepath string) {
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );`
 
+	createConfigTableSQL := `CREATE TABLE IF NOT EXISTS configuration (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		key TEXT NOT NULL UNIQUE,
+		zendesk_email TEXT,
+		value TEXT NOT NULL
+	);`
+
 	_, err = Database.Exec(createUserTableSQL)
 	if err != nil {
 		log.Fatal(err)
@@ -44,4 +51,8 @@ func InitDB(filepath string) {
 		log.Fatal(err)
 	}
 
+	_, err = Database.Exec(createConfigTableSQL)
+	if err != nil {
+		log.Fatal(err)
+	}
 }

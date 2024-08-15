@@ -1,18 +1,24 @@
 {{define "content"}}
-<h1>Edit User</h1>
-<form method="POST" action="/admin/users/edit/{{.EditUser.ID}}">
-    <label for="name">Name:</label>
-    <input type="text" name="name" id="name" value="{{.EditUser.Name}}" required><br>
-
-    <label for="role">Role:</label>
-    <select name="role" id="role">
-        <option value="agent" {{if eq .EditUser.Role "agent"}}selected{{end}}>Agent</option>
-        <option value="admin" {{if eq .EditUser.Role "admin"}}selected{{end}}>Admin</option>
-    </select><br>
-
-    <label for="daily_summary">Daily Summary:</label>
-    <input type="checkbox" name="daily_summary" id="daily_summary" {{if .EditUser.DailySummary}}checked{{end}}><br>
-
-    <button type="submit">Save</button>
-</form>
+<div class="container">
+    <h1 class="mb-4">Edit User</h1>
+    <form method="POST" action="/admin/users/edit/{{.EditUser.ID}}">
+        <div class="mb-3">
+            <label for="name" class="form-label">Name</label>
+            <input type="text" class="form-control" id="name" name="name" value="{{.EditUser.Name}}" required>
+        </div>
+        <div class="mb-3">
+            <label for="role" class="form-label">Role</label>
+            <select class="form-select" id="role" name="role" required>
+                <option value="admin" {{if eq .EditUser.Role "admin"}}selected{{end}}>Admin</option>
+                <option value="agent" {{if eq .EditUser.Role "agent"}}selected{{end}}>Agent</option>
+            </select>
+        </div>
+        <div class="form-check mb-3">
+            <input type="checkbox" class="form-check-input" id="daily_summary" name="daily_summary" {{if .EditUser.DailySummary}}checked{{end}}>
+            <label for="daily_summary" class="form-check-label">Enable Daily Summary</label>
+        </div>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+        <a href="/admin/users" class="btn btn-secondary">Cancel</a>
+    </form>
+</div>
 {{end}}

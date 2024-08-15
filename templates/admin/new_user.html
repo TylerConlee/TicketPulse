@@ -1,21 +1,28 @@
 {{define "content"}}
-<h1>Create New User</h1>
-<form method="POST" action="/admin/users/new">
-    <label for="email">Email:</label>
-    <input type="email" name="email" id="email" required><br>
-
-    <label for="name">Name:</label>
-    <input type="text" name="name" id="name" required><br>
-
-    <label for="role">Role:</label>
-    <select name="role" id="role">
-        <option value="agent">Agent</option>
-        <option value="admin">Admin</option>
-    </select><br>
-
-    <label for="daily_summary">Daily Summary:</label>
-    <input type="checkbox" name="daily_summary" id="daily_summary"><br>
-
-    <button type="submit">Create User</button>
-</form>
+<div class="container">
+    <h1 class="mb-4">Create New User</h1>
+    <form method="POST" action="/admin/users/new">
+        <div class="mb-3">
+            <label for="email" class="form-label">Email</label>
+            <input type="email" class="form-control" id="email" name="email" required>
+        </div>
+        <div class="mb-3">
+            <label for="name" class="form-label">Name</label>
+            <input type="text" class="form-control" id="name" name="name" required>
+        </div>
+        <div class="mb-3">
+            <label for="role" class="form-label">Role</label>
+            <select class="form-select" id="role" name="role" required>
+                <option value="admin">Admin</option>
+                <option value="agent">Agent</option>
+            </select>
+        </div>
+        <div class="form-check mb-3">
+            <input type="checkbox" class="form-check-input" id="daily_summary" name="daily_summary">
+            <label for="daily_summary" class="form-check-label">Enable Daily Summary</label>
+        </div>
+        <button type="submit" class="btn btn-success">Create User</button>
+        <a href="/admin/users" class="btn btn-secondary">Cancel</a>
+    </form>
+</div>
 {{end}}

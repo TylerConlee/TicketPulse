@@ -28,7 +28,7 @@ type User struct {
 	Role         Role
 	DailySummary bool
 	SelectedTags []TagAlert     // New field for storing tag-specific alerts
-	SummaryTime  time.Time      // The preferred time for the daily summary
+	SummaryTime  sql.NullTime   // The preferred time for the daily summary
 	SlackUserID  sql.NullString // The user's Slack ID for direct messages
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
@@ -92,6 +92,12 @@ func GetUserByID(id int) (User, error) {
 		slackUserID = user.SlackUserID.String
 	}
 	user.SlackUserID = sql.NullString{String: slackUserID, Valid: user.SlackUserID.Valid}
+
+	summaryTime := time.Time{}
+	if user.SummaryTime.Valid {
+		summaryTime = user.SummaryTime.Time
+	}
+	user.SummaryTime = sql.NullTime{Time: summaryTime, Valid: user.SummaryTime.Valid}
 
 	return user, err
 }

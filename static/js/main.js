@@ -49,3 +49,28 @@ const eventSource = new EventSource("/events");
         eventSource.onerror = function() {
             console.error("EventSource failed.");
         };
+
+
+        document.getElementById("on-demand-summary-btn").addEventListener("click", function() {
+            const summaryModalContent = document.getElementById("summaryModalContent");
+            summaryModalContent.innerHTML = "Loading...";
+        
+            fetch("/profile/summary/now", {
+                method: "GET",
+                headers: {
+                    "Accept": "application/json",
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.summary) {
+                    summaryModalContent.innerHTML = data.summary;
+                } else {
+                    summaryModalContent.innerHTML = "Failed to load summary.";
+                }
+            })
+            .catch(error => {
+                console.error("Error fetching summary:", error);
+                summaryModalContent.innerHTML = "An error occurred while loading the summary.";
+            });
+        });

@@ -163,6 +163,8 @@ func setupProtectedRoutes(r *mux.Router) *mux.Router {
 	protected.HandleFunc("/profile/update-summary-settings", func(w http.ResponseWriter, r *http.Request) {
 		handlers.ProfileHandler(w, r, Service.SlackService)
 	}).Methods("POST")
+	r.HandleFunc("/profile/summary/now", handlers.OnDemandSummaryHandler).Methods("GET")
+
 	protected.HandleFunc("/settings", handlers.SettingsHandler).Methods("GET", "POST")
 	protected.HandleFunc("/logout", handlers.LogoutHandler).Methods("GET")
 

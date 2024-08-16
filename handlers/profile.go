@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"html/template"
 	"log"
 	"net/http"
@@ -24,6 +25,11 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *servic
 		log.Println("Error retrieving user:", err)
 		http.Error(w, "Unable to retrieve user", http.StatusInternalServerError)
 		return
+	}
+	// Handle sql.NullTime conversion to a string for display
+	summaryTime := ""
+	if user.SummaryTime.Valid {
+		summaryTime = user.SummaryTime.Time.Format("15:04") // Adjust format as needed
 	}
 
 	// Handle updating daily summary settings
@@ -110,11 +116,37 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *servic
 	data["SlackChannels"] = channels
 	data["TagAlerts"] = tagAlerts
 	data["User"] = user
-
+	data["SummaryTime"] = summaryTime
 	// Render the template
 	t := template.Must(template.ParseFiles("templates/layout.html", "templates/profile.html"))
 	if err := t.ExecuteTemplate(w, "layout.html", data); err != nil {
 		log.Printf("Error rendering template: %v", err)
 		http.Error(w, "Unable to render template", http.StatusInternalServerError)
 	}
+}
+
+func OnDemandSummaryHandler(w http.ResponseWriter, r *http.Request) {
+	session, _ := store.Get(r, "session-name")
+	userEmail, ok := session.Values["user_email"].(string)
+	if !ok || userEmail == "" {
+		http.Error(w, "User email is missing", http.StatusBadRequest)
+		return
+	}
+	log.Println("Generating on-demand summary for user:", userEmail)
+	// Retrieve Zendesk configuration from the database
+	subdomain, _ := models.GetConfiguration("zendesk_subdomain")
+	email, _ := models.GetConfiguration("zendesk_email")
+	apiToken, _ := models.GetConfiguration("zendesk_api_key")
+
+	// Create a new Zendesk client
+	zendeskClient := services.NewZendeskClient(subdomain, email, apiToken)
+
+	summary, err := zendeskClient.GenerateDailySummary(userEmail)
+	if err != nil {
+		http.Error(w, "Failed to generate summary", http.StatusInternalServerError)
+		return
+	}
+
+	// Return the summary as JSON
+	json.NewEncoder(w).Encode(map[string]string{"summary": summary})
 }

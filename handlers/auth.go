@@ -139,6 +139,7 @@ func getOrCreateUser(userInfo *oauth2api.Userinfo) (models.User, error) {
 func createSession(w http.ResponseWriter, r *http.Request, user models.User) error {
 	session, _ := store.Get(r, "session-name")
 	session.Values["user_id"] = user.ID
+	session.Values["user_email"] = user.Email
 	session.Values["role"] = user.Role // Store as models.Role type
 
 	return session.Save(r, w)

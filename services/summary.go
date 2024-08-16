@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/nukosuke/go-zendesk/zendesk"
@@ -272,39 +273,88 @@ func filterTicketsWithActiveSLA(tickets []zendesk.Ticket, slaData map[int64]SLAI
 	return activeSLATickets
 }
 
-// compileSummaryMessage generates a summary message from provided ticket data.
 func compileSummaryMessage(userName string, unreadTickets, openTicketsWithSLA []zendesk.Ticket, csatRatings []SatisfactionRating) string {
-	message := fmt.Sprintf("Hello %s! Here’s your Daily Summary for %s:\n\n", userName, time.Now().Format("January 2, 2006"))
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("Hello %s! Here's your Daily Summary for %s:\n\n", userName, time.Now().Format("January 2, 2006")))
 
 	// Unread Tickets
 	if len(unreadTickets) > 0 {
-		message += fmt.Sprintf("You have %d unread tickets that were updated since yesterday:\n", len(unreadTickets))
+		sb.WriteString(fmt.Sprintf("You have %d unread tickets that were updated since yesterday:\n", len(unreadTickets)))
 		for _, ticket := range unreadTickets {
-			message += fmt.Sprintf("- %s (ID: %d)\n", ticket.Subject, ticket.ID)
+			sb.WriteString(fmt.Sprintf("- <%s|%s> (ID: %d)\n  %s\n", ticket.URL, ticket.Subject, ticket.ID, truncateDescription(ticket.Description, 30)))
 		}
 	} else {
-		message += "No unread tickets from the last 24 hours.\n"
+		sb.WriteString("No unread tickets from the last 24 hours.\n")
 	}
 
 	// Open Tickets with Active SLAs
 	if len(openTicketsWithSLA) > 0 {
-		message += fmt.Sprintf("\nYou have %d open tickets with active SLAs:\n", len(openTicketsWithSLA))
+		sb.WriteString(fmt.Sprintf("\nYou have %d open tickets with active SLAs:\n", len(openTicketsWithSLA)))
 		for _, ticket := range openTicketsWithSLA {
-			message += fmt.Sprintf("- %s (ID: %d)\n", ticket.Subject, ticket.ID)
+			sb.WriteString(fmt.Sprintf("- <%s|%s> (ID: %d)\n  %s\n", ticket.URL, ticket.Subject, ticket.ID, truncateDescription(ticket.Description, 30)))
 		}
 	} else {
-		message += "\nNo open tickets with active SLAs.\n"
+		sb.WriteString("\nNo open tickets with active SLAs.\n")
 	}
 
 	// CSAT Ratings
 	if len(csatRatings) > 0 {
-		message += fmt.Sprintf("\nYou received %d new CSAT reviews:\n", len(csatRatings))
+		sb.WriteString(fmt.Sprintf("\nYou received %d new CSAT reviews:\n", len(csatRatings)))
 		for _, rating := range csatRatings {
-			message += fmt.Sprintf("- Rating: %s (Ticket ID: %d)\n", rating.Score, rating.TicketID)
+			sb.WriteString(fmt.Sprintf("- %s\n", rating.Comment))
 		}
 	} else {
-		message += "\nNo new CSAT reviews from the last 24 hours.\n"
+		sb.WriteString("\nNo new CSAT reviews from the last 24 hours.\n")
 	}
 
-	return message
+	return sb.String()
+}
+
+func truncateDescription(desc string, wordCount int) string {
+	words := strings.Fields(desc)
+	if len(words) > wordCount {
+		return strings.Join(words[:wordCount], " ") + "..."
+	}
+	return desc
+}
+func (zc *ZendeskClient) GenerateDailySummary(userEmail string) (string, error) {
+	// Define the time range for the summary (e.g., last 24 hours)
+	now := time.Now()
+	since := now.Add(-24 * time.Hour)
+
+	// Step 1: Get the user ID from the email
+	user, err := zc.GetUserByEmail(userEmail)
+	if err != nil {
+		return "", fmt.Errorf("failed to get user by email: %v", err)
+	}
+
+	// Step 2: Retrieve tickets assigned to the user that were updated in the last 24 hours
+	tickets, err := zc.GetTicketsAssignedToUser(user.ID, since)
+	if err != nil {
+		return "", fmt.Errorf("failed to get tickets assigned to user: %v", err)
+	}
+
+	// Step 3: Retrieve SLA data for the tickets
+	_, slaData, err := zc.SearchTicketsWithActiveSLA()
+	if err != nil {
+		return "", fmt.Errorf("failed to get SLA data: %v", err)
+	}
+
+	// Step 4: Retrieve CSAT ratings for the user from the last 24 hours
+	csatRatings, err := zc.GetCSATRatingsForUser(user.ID, since)
+	if err != nil {
+		return "", fmt.Errorf("failed to get CSAT ratings for user: %v", err)
+	}
+
+	// Step 5: Identify unread tickets (tickets updated but not by the user)
+	unreadTickets := filterUnreadTickets(tickets, user.Email)
+
+	// Step 6: Identify open tickets with active SLAs
+	openTicketsWithSLA := filterTicketsWithActiveSLA(tickets, slaData)
+
+	// Step 7: Compile the summary message
+	message := compileSummaryMessage(user.Name, unreadTickets, openTicketsWithSLA, csatRatings)
+
+	return message, nil
 }

@@ -159,6 +159,10 @@ func setupProtectedRoutes(r *mux.Router) *mux.Router {
 	protected.HandleFunc("/profile/delete-tag/{id}", func(w http.ResponseWriter, r *http.Request) {
 		handlers.ProfileHandler(w, r, Service.SlackService)
 	}).Methods("POST")
+	// Add this route for updating the summary settings
+	protected.HandleFunc("/profile/update-summary-settings", func(w http.ResponseWriter, r *http.Request) {
+		handlers.ProfileHandler(w, r, Service.SlackService)
+	}).Methods("POST")
 	protected.HandleFunc("/settings", handlers.SettingsHandler).Methods("GET", "POST")
 	protected.HandleFunc("/logout", handlers.LogoutHandler).Methods("GET")
 
@@ -184,11 +188,13 @@ func startServer(r *mux.Router, sseServer *middlewares.SSEServer, startZenPollin
 		<-startSlackPollingChan
 		<-startZenPollingChan
 
-		// Initialize SlackService
+		log.Println("Starting SlackService initialization...")
 		slackService, err := services.NewSlackService()
 		if err != nil {
 			log.Fatalf("Failed to initialize Slack service: %v", err)
 		}
+		log.Println("SlackService initialized successfully.")
+		Service = &Services{SlackService: slackService}
 
 		// Start Zendesk polling with the SlackService
 		go services.StartZendeskPolling(sseServer, slackService)
@@ -197,7 +203,7 @@ func startServer(r *mux.Router, sseServer *middlewares.SSEServer, startZenPollin
 		go slackService.StartSocketMode()
 	}()
 
-	fmt.Println("Starting server on :8080...")
+	log.Println("Starting server on :8080...")
 	if err := http.ListenAndServe(":8080", r); err != nil {
 		log.Fatal("Server failed:", err)
 	}

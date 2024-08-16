@@ -2,6 +2,7 @@ package middlewares
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"sync"
 )
@@ -50,6 +51,8 @@ func formatNotificationMessage(notification Notification) string {
 // NotificationMiddleware to attach notifications to the request context
 func NotificationMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Entering NotificationMiddleware")
+		defer log.Println("Exiting NotificationMiddleware")
 		notifications := []Notification{}
 
 		// Lock the mutex and add global notifications

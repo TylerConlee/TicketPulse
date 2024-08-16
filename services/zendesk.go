@@ -1,12 +1,8 @@
 package services
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/TylerConlee/TicketPulse/middlewares"
@@ -15,12 +11,13 @@ import (
 )
 
 type ZendeskClient struct {
+	client    *zendesk.Client
 	Subdomain string
 	Email     string
 	APIToken  string
-	client    *http.Client
 }
 
+// SLAPolicyMetric represents SLA metrics for a ticket
 type SLAPolicyMetric struct {
 	BreachAt time.Time `json:"breach_at"`
 	Stage    string    `json:"stage"`
@@ -30,139 +27,56 @@ type SLAPolicyMetric struct {
 	Days     int       `json:"days"`
 }
 
+// SLAInfo holds SLA metrics for a ticket
 type SLAInfo struct {
 	PolicyMetrics []SLAPolicyMetric `json:"policy_metrics"`
 }
 
-type SLAResponse struct {
-	SLAPolicies []struct {
-		TicketID      int64             `json:"ticket_id"`
-		PolicyMetrics []SLAPolicyMetric `json:"policy_metrics"`
-	} `json:"slas"`
+// SatisfactionRating represents CSAT data from Zendesk.
+type SatisfactionRating struct {
+	ID        int64  `json:"id"`
+	Score     string `json:"score"`
+	Comment   string `json:"comment"`
+	CreatedAt string `json:"created_at"`
+	TicketID  int64  `json:"ticket_id"`
 }
 
+// NewZendeskClient initializes a new ZendeskClient
 func NewZendeskClient(subdomain, email, apiToken string) *ZendeskClient {
+	client, err := zendesk.NewClient(nil)
+	if err != nil {
+		fmt.Printf("Failed to create Zendesk client: %v\n", err)
+	}
+	client.SetSubdomain(subdomain)
+	client.SetCredential(zendesk.NewAPITokenCredential(email, apiToken))
+
 	return &ZendeskClient{
+		client:    client,
 		Subdomain: subdomain,
 		Email:     email,
 		APIToken:  apiToken,
-		client:    &http.Client{Timeout: 10 * time.Second},
 	}
 }
-func (zc *ZendeskClient) SearchTicketsWithActiveSLA() ([]zendesk.Ticket, map[int64]SLAInfo, error) {
-	var allTickets []zendesk.Ticket
-	slaData := make(map[int64]SLAInfo)
-
-	query := "type:ticket status<pending"
-	params := url.Values{}
-	params.Set("query", query)
-	params.Set("include", "tickets(slas)") // Correct sideloading parameter
-
-	endpoint := fmt.Sprintf("https://%s.zendesk.com/api/v2/search.json?%s", zc.Subdomain, params.Encode())
-
-	for endpoint != "" {
-		req, err := http.NewRequest("GET", endpoint, nil)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create request: %w", err)
-		}
-
-		req.SetBasicAuth(zc.Email+"/token", zc.APIToken)
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := zc.client.Do(req.WithContext(context.Background()))
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to perform request: %w", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			return nil, nil, fmt.Errorf("failed to search tickets: received status %s", resp.Status)
-		}
-
-		var result struct {
-			Results []struct {
-				zendesk.Ticket
-				SLAMetrics struct {
-					PolicyMetrics []SLAPolicyMetric `json:"policy_metrics"`
-				} `json:"slas"`
-			} `json:"results"`
-			NextPage string `json:"next_page"`
-		}
-
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			return nil, nil, fmt.Errorf("failed to parse ticket search response: %w", err)
-		}
-
-		// Process tickets and extract SLA data
-		for _, ticketResult := range result.Results {
-			allTickets = append(allTickets, ticketResult.Ticket)
-
-			// Only store metrics with active SLAs
-			var relevantMetrics []SLAPolicyMetric
-			for _, metric := range ticketResult.SLAMetrics.PolicyMetrics {
-				if metric.Stage == "active" {
-					relevantMetrics = append(relevantMetrics, metric)
-				}
-			}
-			if len(relevantMetrics) > 0 {
-				slaData[ticketResult.Ticket.ID] = SLAInfo{
-					PolicyMetrics: relevantMetrics,
-				}
-			}
-		}
-
-		endpoint = result.NextPage
+func getZendeskConfig() (string, string, string, error) {
+	apiKey, err := models.GetConfiguration("zendesk_api_key")
+	if err != nil || apiKey == "" {
+		return "", "", "", fmt.Errorf("zendesk API key not configured")
 	}
 
-	return allTickets, slaData, nil
-}
-
-func (zc *ZendeskClient) SearchNewOrUpdatedTickets(since time.Time) ([]zendesk.Ticket, error) {
-	var allTickets []zendesk.Ticket
-
-	query := fmt.Sprintf("type:ticket updated>%s", since.Format(time.RFC3339))
-	params := url.Values{}
-	params.Set("query", query)
-
-	endpoint := fmt.Sprintf("https://%s.zendesk.com/api/v2/search.json?%s", zc.Subdomain, params.Encode())
-
-	for endpoint != "" {
-
-		req, err := http.NewRequest("GET", endpoint, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create request: %w", err)
-		}
-
-		req.SetBasicAuth(zc.Email+"/token", zc.APIToken)
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := zc.client.Do(req.WithContext(context.Background()))
-		if err != nil {
-			return nil, fmt.Errorf("failed to perform request: %w", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("failed to search tickets: received status %s", resp.Status)
-		}
-
-		var result struct {
-			Results  []zendesk.Ticket `json:"results"`
-			NextPage string           `json:"next_page"`
-		}
-
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			return nil, fmt.Errorf("failed to parse ticket search response: %w", err)
-		}
-
-		allTickets = append(allTickets, result.Results...)
-
-		endpoint = result.NextPage
+	email, err := models.GetConfiguration("zendesk_email")
+	if err != nil || email == "" {
+		return "", "", "", fmt.Errorf("zendesk email not configured")
 	}
 
-	return allTickets, nil
+	subdomain, err := models.GetConfiguration("zendesk_subdomain")
+	if err != nil || subdomain == "" {
+		return "", "", "", fmt.Errorf("zendesk subdomain not configured")
+	}
+
+	return subdomain, email, apiKey, nil
 }
 
+// StartZendeskPolling handles periodic polling of tickets from Zendesk.
 func StartZendeskPolling(sseServer *middlewares.SSEServer, slackService *SlackService) {
 	var lastPollTime = time.Now().Add(-5 * time.Minute) // Start 5 minutes before now
 
@@ -204,26 +118,8 @@ func StartZendeskPolling(sseServer *middlewares.SSEServer, slackService *SlackSe
 	}
 }
 
-func getZendeskConfig() (string, string, string, error) {
-	apiKey, err := models.GetConfiguration("zendesk_api_key")
-	if err != nil || apiKey == "" {
-		return "", "", "", fmt.Errorf("zendesk API key not configured")
-	}
-
-	email, err := models.GetConfiguration("zendesk_email")
-	if err != nil || email == "" {
-		return "", "", "", fmt.Errorf("zendesk email not configured")
-	}
-
-	subdomain, err := models.GetConfiguration("zendesk_subdomain")
-	if err != nil || subdomain == "" {
-		return "", "", "", fmt.Errorf("zendesk subdomain not configured")
-	}
-
-	return subdomain, email, apiKey, nil
-}
+// processTickets processes the tickets, checking for SLA conditions, tag matches, and updates.
 func processTickets(tickets []zendesk.Ticket, slaData map[int64]SLAInfo, sseServer *middlewares.SSEServer, slackService *SlackService) {
-
 	for _, ticket := range tickets {
 		userAlerts, err := models.GetAllTagAlerts()
 		if err != nil {
@@ -271,42 +167,14 @@ func processTickets(tickets []zendesk.Ticket, slaData map[int64]SLAInfo, sseServ
 	middlewares.AddGlobalNotification(sseServer, "Ticket processing complete", fmt.Sprintf("Processed %v tickets...", len(tickets)), "success")
 }
 
-func tagMatches(alertTag string, ticketTags []string) bool {
-	for _, tag := range ticketTags {
-		if tag == alertTag {
-			return true
-		}
-	}
-	return false
-}
-
-// Determine if a ticket is new since the last poll
-func isNewTicket(ticket zendesk.Ticket) bool {
-	// Replace with actual last poll time
-	lastPollTime := time.Now().Add(-5 * time.Minute)
-	return ticket.CreatedAt.After(lastPollTime)
-}
-
-// Determine if a ticket was updated since the last poll
-func isUpdatedTicket(ticket zendesk.Ticket) bool {
-	// Replace with actual last poll time
-	lastPollTime := time.Now().Add(-5 * time.Minute)
-	return ticket.UpdatedAt.After(lastPollTime)
-}
-
+// slaConditionMatches checks if the SLA condition matches the threshold for sending alerts.
 func slaConditionMatches(slaMetrics []SLAPolicyMetric) (string, bool) {
-
 	for _, metric := range slaMetrics {
-		// Check if the SLA metric is still active
 		if metric.Stage == "active" {
-			// Calculate the time remaining until the SLA breach
 			timeRemaining := time.Until(metric.BreachAt)
-			// Check if the SLA has been breached (negative time remaining)
 			if timeRemaining < 0 {
 				return "SLA Breached", true
 			}
-
-			// Check if the SLA is within the alert threshold
 			switch {
 			case timeRemaining <= 3*time.Hour && timeRemaining > 2*time.Hour:
 				return "Less than 3 hours remaining", true
@@ -321,8 +189,29 @@ func slaConditionMatches(slaMetrics []SLAPolicyMetric) (string, bool) {
 			}
 		}
 	}
-
 	return "", false
+}
+
+// Helper function to check if a tag matches
+func tagMatches(alertTag string, ticketTags []string) bool {
+	for _, tag := range ticketTags {
+		if tag == alertTag {
+			return true
+		}
+	}
+	return false
+}
+
+// Helper function to determine if a ticket is new
+func isNewTicket(ticket zendesk.Ticket) bool {
+	lastPollTime := time.Now().Add(-5 * time.Minute)
+	return ticket.CreatedAt.After(lastPollTime)
+}
+
+// Helper function to determine if a ticket is updated
+func isUpdatedTicket(ticket zendesk.Ticket) bool {
+	lastPollTime := time.Now().Add(-5 * time.Minute)
+	return ticket.UpdatedAt.After(lastPollTime)
 }
 
 // Log the alert for now
@@ -331,16 +220,19 @@ func logAlert(alert models.TagAlert, ticket zendesk.Ticket, alertType string) {
 		alertType, ticket.ID, ticket.Subject, alert.Tag)
 }
 
+// SLAAlertTracker keeps track of which alerts have already been sent.
 type SLAAlertTracker struct {
 	Thresholds map[int64]map[string]bool // Map of ticket ID to threshold alerts
 }
 
+// NewSLAAlertTracker initializes an SLAAlertTracker
 func NewSLAAlertTracker() *SLAAlertTracker {
 	return &SLAAlertTracker{
 		Thresholds: make(map[int64]map[string]bool),
 	}
 }
 
+// HasAlerted checks if a ticket has already triggered an alert at the given threshold
 func (tracker *SLAAlertTracker) HasAlerted(ticketID int64, threshold string) bool {
 	if tracker.Thresholds[ticketID] == nil {
 		tracker.Thresholds[ticketID] = make(map[string]bool)
@@ -348,6 +240,7 @@ func (tracker *SLAAlertTracker) HasAlerted(ticketID int64, threshold string) boo
 	return tracker.Thresholds[ticketID][threshold]
 }
 
+// SetAlerted marks that a ticket has triggered an alert at the given threshold
 func (tracker *SLAAlertTracker) SetAlerted(ticketID int64, threshold string) {
 	tracker.Thresholds[ticketID][threshold] = true
 }

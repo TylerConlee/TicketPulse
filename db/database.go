@@ -22,7 +22,11 @@ func InitDB(filepath string) {
     name TEXT,
     role TEXT,
     daily_summary BOOLEAN,
-	selected_tags TEXT
+	selected_tags TEXT,
+	summary_time DATETIME,
+	slack_user_id TEXT,
+	created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+	updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 `
 	createTagsTableSQL := `CREATE TABLE IF NOT EXISTS user_tag_alerts (

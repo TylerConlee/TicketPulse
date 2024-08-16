@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/gob"
 	"log"
+	"time"
 
 	"github.com/TylerConlee/TicketPulse/db"
 )
@@ -26,7 +27,11 @@ type User struct {
 	Name         string
 	Role         Role
 	DailySummary bool
-	SelectedTags []TagAlert // New field for storing tag-specific alerts
+	SelectedTags []TagAlert     // New field for storing tag-specific alerts
+	SummaryTime  time.Time      // The preferred time for the daily summary
+	SlackUserID  sql.NullString // The user's Slack ID for direct messages
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type TagAlert struct {
@@ -73,13 +78,20 @@ func GetUserByEmail(email string) (User, error) {
 
 // GetUserByID retrieves a user by their ID
 func GetUserByID(id int) (User, error) {
-	row := db.Database.QueryRow(`SELECT id, email, name, role, daily_summary FROM users WHERE id = ?`, id)
+	row := db.Database.QueryRow(`SELECT id, email, name, role, daily_summary, summary_time, slack_user_id FROM users WHERE id = ?`, id)
 	var user User
 
-	err := row.Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.DailySummary)
+	err := row.Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.DailySummary, &user.SummaryTime, &user.SlackUserID)
 	if err != nil {
 		return user, err
 	}
+
+	// Convert sql.NullString to regular string or handle NULL case
+	slackUserID := ""
+	if user.SlackUserID.Valid {
+		slackUserID = user.SlackUserID.String
+	}
+	user.SlackUserID = sql.NullString{String: slackUserID, Valid: user.SlackUserID.Valid}
 
 	return user, err
 }
@@ -199,4 +211,30 @@ func GetAllTagAlerts() ([]TagAlert, error) {
 		alerts = append(alerts, alert)
 	}
 	return alerts, nil
+}
+
+// UpdateDailySummarySettings updates the user's daily summary settings.
+func (u *User) UpdateDailySummarySettings(dailySummary bool, summaryTime time.Time) error {
+	_, err := db.Database.Exec(`UPDATE users SET daily_summary = ?, summary_time = ? WHERE id = ?`, dailySummary, summaryTime, u.ID)
+	return err
+}
+
+// GetUsersWithDailySummaryEnabled returns a list of users who have enabled the daily summary.
+func GetUsersWithDailySummaryEnabled(db *sql.DB) ([]User, error) {
+	rows, err := db.Query(`SELECT id, name, email, role, daily_summary, summary_time, slack_user_id FROM users WHERE daily_summary = 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var user User
+		err := rows.Scan(&user.ID, &user.Name, &user.Email, &user.Role, &user.DailySummary, &user.SummaryTime, &user.SlackUserID)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, nil
 }

@@ -12,6 +12,7 @@ import (
 type SlackService struct {
 	client     *slack.Client
 	socketMode *socketmode.Client
+	ready      bool
 }
 
 func NewSlackService() (*SlackService, error) {
@@ -36,7 +37,13 @@ func NewSlackService() (*SlackService, error) {
 	return &SlackService{
 		client:     client,
 		socketMode: socketMode,
+		ready:      true,
 	}, nil
+}
+
+// IsReady checks if the Slack service is ready
+func (s *SlackService) IsReady() bool {
+	return s.ready
 }
 
 func (s *SlackService) GetConversations() ([]slack.Channel, error) {

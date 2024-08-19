@@ -1,5 +1,62 @@
 {{define "content"}}
-<h1>Welcome, {{.User.Name}}</h1>
-<p>Role: {{.User.Role}}</p>
-<p>Here you can navigate to different sections of your profile, settings, and more.</p>
+<div class="row">
+  <div class="col-lg-6 grid-margin stretch-card">
+    <div class="card">
+      <div class="card-body">
+        <h4 class="card-title">Alert Frequency</h4>
+        {{if .HasAlertData}}
+        <canvas id="newTicketChart"></canvas>
+        {{else}}
+<div class="alert alert-warning" role="alert">
+    No data available to display.
+</div>
+{{end}}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6 grid-margin stretch-card">
+    <div class="card">
+      <div class="card-body">
+        <h4 class="card-title">SLA Deadline Alerts</h4>
+        {{if .HasAlertData}}
+        <canvas id="slaDeadlineChart"></canvas>
+        {{else}}
+<div class="alert alert-warning" role="alert">
+    No data available to display.
+</div>
+{{end}}
+      </div>
+    </div>
+  </div>
+</div>
+{{if .HasAlertData}}
+<script>
+  // Example data passed via the backend
+  const newTicketData = {{ .NewTicketData }};
+  const slaDeadlineData = {{ .SlaDeadlineData }};
+
+  const ctxNewTicket = document.getElementById('newTicketChart').getContext('2d');
+  const ctxSlaDeadline = document.getElementById('slaDeadlineChart').getContext('2d');
+
+  // Initialize new ticket chart
+  new Chart(ctxNewTicket, {
+    type: 'line',
+    data: newTicketData,
+    options: {
+      // Chart options here
+    }
+  });
+
+  // Initialize SLA deadline chart
+  new Chart(ctxSlaDeadline, {
+    type: 'line',
+    data: slaDeadlineData,
+    options: {
+      // Chart options here
+    }
+  });
+</script>
+{{else}}
+{{end}}
+
 {{end}}

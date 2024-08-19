@@ -1,9 +1,12 @@
 package services
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 
+	"github.com/TylerConlee/TicketPulse/middlewares"
 	"github.com/TylerConlee/TicketPulse/models"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
@@ -13,16 +16,20 @@ type SlackService struct {
 	client     *slack.Client
 	socketMode *socketmode.Client
 	ready      bool
+	sseServer  *middlewares.SSEServer
 }
 
-func NewSlackService() (*SlackService, error) {
+func NewSlackService(sseServer *middlewares.SSEServer) (*SlackService, error) {
+	broadcastStatusUpdates(sseServer, "slack", "polling", "Connecting to Slack...")
 	botToken, err := models.GetConfiguration("slack_bot_token")
 	if err != nil || botToken == "" {
+		broadcastStatusUpdates(sseServer, "slack", "error", "Bot token not yet configured")
 		return nil, fmt.Errorf("slack bot token not configured")
 	}
 
 	appToken, err := models.GetConfiguration("slack_app_token")
 	if err != nil || appToken == "" {
+		broadcastStatusUpdates(sseServer, "slack", "error", "App token not yet configured")
 		return nil, fmt.Errorf("slack app token not configured")
 	}
 
@@ -38,6 +45,7 @@ func NewSlackService() (*SlackService, error) {
 		client:     client,
 		socketMode: socketMode,
 		ready:      true,
+		sseServer:  sseServer,
 	}, nil
 }
 
@@ -95,8 +103,11 @@ func (s *SlackService) SendAlert(channelID, message string) error {
 }
 
 func (s *SlackService) StartSocketMode() {
+	broadcastStatusUpdates(s.sseServer, "slack", "connected", "")
 	go func() {
+
 		for evt := range s.socketMode.Events {
+
 			switch evt.Type {
 			case socketmode.EventTypeInteractive:
 				callback, ok := evt.Data.(slack.InteractionCallback)
@@ -116,6 +127,7 @@ func (s *SlackService) StartSocketMode() {
 		}
 	}()
 	s.socketMode.Run()
+
 }
 
 func (s *SlackService) HandleAcknowledge(callback slack.InteractionCallback) {
@@ -132,4 +144,42 @@ func (s *SlackService) SendMessage(channelID, message string) error {
 		slack.MsgOptionText(message, false),
 	)
 	return err
+}
+
+func (s *SlackService) GetUserIDByEmail(email string) (string, error) {
+	user, err := s.client.GetUserByEmail(email)
+	if err != nil {
+		return "", err
+	}
+
+	if user.ID == "" {
+		return "", errors.New("no Slack user ID found for the provided email")
+	}
+
+	return user.ID, nil
+}
+
+func broadcastStatusUpdates(sseServer *middlewares.SSEServer, service, status, errorMsg string) {
+	// Create a map to hold the event data
+	data := map[string]interface{}{
+		"service": service,
+		"status":  status,
+		"error":   errorMsg,
+	}
+
+	// Create the event payload
+	event := map[string]interface{}{
+		"event": "connection-status",
+		"data":  data,
+	}
+
+	// Marshal the event to JSON
+	message, err := json.Marshal(event)
+	if err != nil {
+		log.Printf("Failed to marshal status update: %v", err)
+		return
+	}
+
+	// Broadcast the JSON message to all connected clients
+	sseServer.NotifyAll(string(message))
 }

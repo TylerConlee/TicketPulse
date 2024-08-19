@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
 	"html/template"
 	"log"
@@ -45,6 +46,30 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *servic
 		if err != nil {
 			http.Error(w, "Unable to update settings", http.StatusInternalServerError)
 			return
+		}
+		http.Redirect(w, r, "/profile", http.StatusSeeOther)
+		return
+	}
+
+	if r.Method == "POST" && r.URL.Path == "/profile/update-slack-id" {
+		// Handle Slack User ID update
+		if slackService.IsReady() {
+			slackEmail := r.FormValue("slack_email")
+			if slackEmail == "" {
+				slackEmail = user.Email
+			}
+
+			slackUserID, err := slackService.GetUserIDByEmail(slackEmail)
+			if err == nil {
+				user.SlackUserID = sql.NullString{String: slackUserID, Valid: true}
+				if err := models.UpdateUser(user); err != nil {
+					log.Printf("Error updating user Slack ID: %v", err)
+					http.Error(w, "Failed to update Slack ID", http.StatusInternalServerError)
+					return
+				}
+			} else {
+				log.Printf("Error retrieving Slack ID: %v", err)
+			}
 		}
 		http.Redirect(w, r, "/profile", http.StatusSeeOther)
 		return

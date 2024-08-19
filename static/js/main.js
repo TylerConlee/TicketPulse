@@ -1,3 +1,4 @@
+// Toggles the side navigation menu
 function toggleMenu() {
     const nav = document.getElementById("side-nav");
     nav.classList.toggle("open");
@@ -6,71 +7,131 @@ function toggleMenu() {
     main.classList.toggle("shifted");
 }
 
+// On-demand summary button click handler
+const summaryButton = document.getElementById("on-demand-summary-btn");
+if (summaryButton) {
+    summaryButton.addEventListener("click", function() {
+        const summaryModalContent = document.getElementById("summaryModalContent");
+        summaryModalContent.innerHTML = "Loading...";
 
+        fetch("/profile/summary/now", {
+            method: "GET",
+            headers: {
+                "Accept": "application/json",
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.summary) {
+                summaryModalContent.innerHTML = data.summary;
+            } else {
+                summaryModalContent.innerHTML = "Failed to load summary.";
+            }
+        })
+        .catch(error => {
+            console.error("Error fetching summary:", error);
+            summaryModalContent.innerHTML = "An error occurred while loading the summary.";
+        });
+    });
+}
+
+// Handle incoming SSE events
 const eventSource = new EventSource("/events");
 
-        eventSource.onmessage = function(event) {
-            console.log("Received event:", event.data); // Add this line
+eventSource.onmessage = function(event) {
+    console.log("Received event:", event.data);
 
-            const toastContainer = document.getElementById("toast-container");
+    let message;
+    try {
+        message = JSON.parse(event.data);
+    } catch (e) {
+        console.warn("Failed to parse JSON, treating as plain text:", event.data);
+        message = event.data;
+    }
 
-            // Extract category, message, and severity from the event data
-            const [fullMessage, severity] = event.data.split("(");
-            const message = fullMessage.trim();
-            const severityClass = severity.replace(")", "").trim();
+    if (typeof message === "string") {
+        const toastContainer = document.getElementById("toast-container");
+        if (toastContainer) {
+            handleToastNotification(message, toastContainer);
+        }
+    } else if (typeof message === "object" && message.event === "connection-status") {
+        handleConnectionStatus(message.data);
+    }
+};
 
+eventSource.onerror = function() {
+    console.error("EventSource failed.");
+};
 
-            console.log("Creating toast with message:", message); // Debugging line
+// Function to handle toast notifications
+function handleToastNotification(message, toastContainer) {
+    let fullMessage = message;
+    let severityClass = "info"; // Default severity class
 
-            // Create a new toast element
-            const toast = document.createElement("div");
-            toast.className = `toast align-items-center text-bg-${severityClass} border-0`;
-            toast.role = "alert";
-            toast.ariaLive = "assertive";
-            toast.ariaAtomic = "true";
+    try {
+        if (message.includes("(") && message.includes(")")) {
+            const parts = message.split("(");
+            fullMessage = parts[0].trim();
+            severityClass = parts[1].replace(")", "").trim();
+        }
+    } catch (error) {
+        console.error("Error processing event data:", error);
+    }
 
-            toast.innerHTML = `
-                <div class="d-flex">
-                    <div class="toast-body">
-                        ${message}
-                    </div>
-                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
-                </div>
-            `;
+    console.log("Creating toast with message:", fullMessage);
 
-            // Append the toast to the container
-            toastContainer.appendChild(toast);
+    const toast = document.createElement("div");
+    toast.className = `toast align-items-center text-bg-${severityClass} border-0`;
+    toast.role = "alert";
+    toast.ariaLive = "assertive";
+    toast.ariaAtomic = "true";
 
-            // Initialize the Bootstrap toast
-            const bootstrapToast = new bootstrap.Toast(toast);
-            bootstrapToast.show();
-        };
+    toast.innerHTML = `
+        <div class="d-flex">
+            <div class="toast-body">
+                ${fullMessage}
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+    `;
 
-        eventSource.onerror = function() {
-            console.error("EventSource failed.");
-        };
+    toastContainer.appendChild(toast);
 
+    const bootstrapToast = new bootstrap.Toast(toast);
+    bootstrapToast.show();
+}
 
-        document.getElementById("on-demand-summary-btn").addEventListener("click", function() {
-            const summaryModalContent = document.getElementById("summaryModalContent");
-            summaryModalContent.innerHTML = "Loading...";
-        
-            fetch("/profile/summary/now", {
-                method: "GET",
-                headers: {
-                    "Accept": "application/json",
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.summary) {
-                    summaryModalContent.innerHTML = data.summary;
-                } else {
-                    summaryModalContent.innerHTML = "Failed to load summary.";
-                }
-            })
-            .catch(error => {
-                console.error("Error fetching summary:", error);
-                summaryModalContent.innerHTML = "An error occurred while loading the summary.";
-            });
-        });
+// Function to handle connection status updates
+function handleConnectionStatus(data) {
+    const service = data.service;
+    const status = data.status;
+    const error = data.error || "";
+
+    let iconElement;
+
+    if (service === "zendesk") {
+        iconElement = document.querySelector('.mdi-headset');
+    } else if (service === "slack") {
+        iconElement = document.querySelector('.mdi-slack');
+    }
+
+    if (iconElement) {
+        const countSymbol = iconElement.nextElementSibling;
+        if (countSymbol) {
+            if (status === "connected") {
+                countSymbol.className = "count-symbol bg-success";
+                countSymbol.title = "Connected";
+            } else if (status === "polling") {
+                countSymbol.className = "count-symbol bg-warning";
+                countSymbol.title = "Connecting...";
+            } else if (status === "error") {
+                countSymbol.className = "count-symbol bg-danger";
+                countSymbol.title = error;
+            }
+        } else {
+            console.warn("Could not find count-symbol element for", service);
+        }
+    } else {
+        console.warn("Could not find icon element for service:", service);
+    }
+}

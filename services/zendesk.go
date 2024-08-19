@@ -79,11 +79,12 @@ func getZendeskConfig() (string, string, string, error) {
 // StartZendeskPolling handles periodic polling of tickets from Zendesk.
 func StartZendeskPolling(sseServer *middlewares.SSEServer, slackService *SlackService) {
 	var lastPollTime = time.Now().Add(-5 * time.Minute) // Start 5 minutes before now
-
+	broadcastStatusUpdates(sseServer, "zendesk", "connected", "")
 	for {
 		subdomain, email, apiKey, err := getZendeskConfig()
 		if err != nil {
 			middlewares.AddGlobalNotification(sseServer, "Zendesk Configuration Error", fmt.Sprintf("Error fetching Zendesk configuration: %v", err), "danger")
+			broadcastStatusUpdates(sseServer, "zendesk", "error", "Error fetching Zendesk configuration")
 			time.Sleep(5 * time.Minute)
 			continue
 		}
@@ -94,6 +95,7 @@ func StartZendeskPolling(sseServer *middlewares.SSEServer, slackService *SlackSe
 		slaTickets, slaData, err := zendeskClient.SearchTicketsWithActiveSLA()
 		if err != nil {
 			middlewares.AddGlobalNotification(sseServer, "Zendesk Connectivity Error", fmt.Sprintf("Error searching SLA tickets: %v", err), "warning")
+			broadcastStatusUpdates(sseServer, "zendesk", "error", "Error searching SLA tickets")
 			time.Sleep(5 * time.Minute)
 			continue
 		}
@@ -101,6 +103,7 @@ func StartZendeskPolling(sseServer *middlewares.SSEServer, slackService *SlackSe
 		newUpdatedTickets, err := zendeskClient.SearchNewOrUpdatedTickets(lastPollTime)
 		if err != nil {
 			middlewares.AddGlobalNotification(sseServer, "Zendesk Connectivity Error", fmt.Sprintf("Error searching new/updated tickets: %v", err), "warning")
+			broadcastStatusUpdates(sseServer, "zendesk", "error", "Error searching new/updated tickets")
 			time.Sleep(5 * time.Minute)
 			continue
 		}

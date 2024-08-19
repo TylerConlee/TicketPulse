@@ -1,15 +1,56 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login</title>
-</head>
-<body>
-    <h1>Login</h1>
-    <p>Click the button below to sign in with Google:</p>
-    <a href="/auth/google/login">
-        <button>Login with Google</button>
-    </a>
-</body>
+  <head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Login - TicketPulse</title>
+    <!-- plugins:css -->
+    <link rel="stylesheet" href="/static/vendors/mdi/css/materialdesignicons.min.css">
+    <link rel="stylesheet" href="/static/vendors/ti-icons/css/themify-icons.css">
+    <link rel="stylesheet" href="/static/vendors/css/vendor.bundle.base.css">
+    <link rel="stylesheet" href="/static/vendors/font-awesome/css/font-awesome.min.css">
+    <!-- endinject -->
+    <!-- Layout styles -->
+    <link rel="stylesheet" href="/static/css/style.css">
+    <!-- End layout styles -->
+    <link rel="shortcut icon" href="/static/images/favicon.png" />
+  </head>
+  <body>
+    <div class="container-scroller">
+      <div class="container-fluid page-body-wrapper full-page-wrapper">
+        <div class="content-wrapper d-flex align-items-center auth">
+          <div class="row flex-grow">
+            <div class="col-lg-4 mx-auto">
+              <div class="auth-form-light text-left p-5">
+                <div class="brand-logo">
+                  <img src="/static/images/logo.svg" alt="TicketPulse Logo">
+                </div>
+                <h4>Welcome! Please sign in.</h4>
+                <h6 class="font-weight-light">Sign in with Google to continue.</h6>
+               
+                <form class="pt-3" method="GET" action="/auth/google/login">
+                  <div class="d-grid gap-2">
+                    <button type="submit" class="btn btn-block btn-google auth-form-btn">
+                      <i class="mdi mdi-google me-2"></i>Sign in with Google
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- content-wrapper ends -->
+      </div>
+      <!-- page-body-wrapper ends -->
+    </div>
+    <!-- container-scroller -->
+    <!-- plugins:js -->
+    <script src="/static/vendors/js/vendor.bundle.base.js"></script>
+    <!-- endinject -->
+    <!-- inject:js -->
+    <script src="/static/js/off-canvas.js"></script>
+    <script src="/static/js/misc.js"></script>
+    <!-- endinject -->
+  </body>
 </html>

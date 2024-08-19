@@ -191,7 +191,7 @@ func startServer(r *mux.Router, sseServer *middlewares.SSEServer, startZenPollin
 		<-startZenPollingChan
 
 		log.Println("Starting SlackService initialization...")
-		slackService, err := services.NewSlackService()
+		slackService, err := services.NewSlackService(sseServer)
 		if err != nil {
 			log.Fatalf("Failed to initialize Slack service: %v", err)
 		}

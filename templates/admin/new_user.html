@@ -1,28 +1,36 @@
 {{define "content"}}
-<div class="container">
-    <h1 class="mb-4">Create New User</h1>
-    <form method="POST" action="/admin/users/new">
-        <div class="mb-3">
-            <label for="email" class="form-label">Email</label>
-            <input type="email" class="form-control" id="email" name="email" required>
+<div class="row flex-grow">
+    <div class="col-lg-6 mx-auto">
+        <div class="auth-form-light text-left p-5">
+            <h4>Create New User</h4>
+            <h6 class="font-weight-light">Fill in the details to create a new user account.</h6>
+            <form method="POST" action="/admin/users/new" class="pt-3">
+                <div class="form-group">
+                    <input type="email" class="form-control form-control-lg" id="email" name="email" placeholder="Email" required>
+                </div>
+                <div class="form-group">
+                    <input type="text" class="form-control form-control-lg" id="name" name="name" placeholder="Name" required>
+                </div>
+                <div class="form-group">
+                    <select class="form-select form-select-lg" id="role" name="role" required>
+                        <option value="" disabled selected>Select Role</option>
+                        <option value="admin">Admin</option>
+                        <option value="agent">Agent</option>
+                    </select>
+                </div>
+                <div class="form-check mb-4">
+                    <label class="form-check-label text-muted">
+                        <input type="checkbox" class="form-check-input" id="daily_summary" name="daily_summary"> Enable Daily Summary
+                    </label>
+                </div>
+                <div class="mt-3 d-grid gap-2">
+                    <button type="submit" class="btn btn-block btn-gradient-primary btn-lg font-weight-medium auth-form-btn">Create User</button>
+                </div>
+                <div class="text-center mt-4 font-weight-light">
+                    <a href="/admin/users" class="text-primary">Cancel</a>
+                </div>
+            </form>
         </div>
-        <div class="mb-3">
-            <label for="name" class="form-label">Name</label>
-            <input type="text" class="form-control" id="name" name="name" required>
-        </div>
-        <div class="mb-3">
-            <label for="role" class="form-label">Role</label>
-            <select class="form-select" id="role" name="role" required>
-                <option value="admin">Admin</option>
-                <option value="agent">Agent</option>
-            </select>
-        </div>
-        <div class="form-check mb-3">
-            <input type="checkbox" class="form-check-input" id="daily_summary" name="daily_summary">
-            <label for="daily_summary" class="form-check-label">Enable Daily Summary</label>
-        </div>
-        <button type="submit" class="btn btn-success">Create User</button>
-        <a href="/admin/users" class="btn btn-secondary">Cancel</a>
-    </form>
+    </div>
 </div>
 {{end}}

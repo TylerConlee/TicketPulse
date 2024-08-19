@@ -21,7 +21,6 @@ func AuthMiddleware(next http.Handler) http.Handler {
 func AdminMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session, _ := store.Get(r, "session-name")
-		log.Printf("Session Data in AdminMiddleware: %+v\n", session.Values)
 
 		roleValue, exists := session.Values["role"]
 		if !exists {
@@ -29,8 +28,6 @@ func AdminMiddleware(next http.Handler) http.Handler {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-
-		log.Printf("Role value type: %T\n", roleValue)
 
 		userRole, ok := roleValue.(models.Role)
 		if !ok {

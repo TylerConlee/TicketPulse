@@ -164,7 +164,7 @@ func processTickets(tickets []zendesk.Ticket, slaData map[int64]SLAInfo, sseServ
 					if slaInfo, ok := slaData[ticket.ID]; ok {
 						if label, matches := slaConditionMatches(slaInfo.PolicyMetrics); matches {
 							// Check existing alerts for this ticket and SLA category
-							existingAlert, found := models.GetSLAAlertCache(int64(alert.UserID), ticket.ID, alert.AlertType)
+							existingAlert, found := models.GetSLAAlertCache(int64(alert.User.ID), ticket.ID, alert.AlertType)
 							if found && existingAlert.BreachAt != slaInfo.PolicyMetrics[0].BreachAt {
 								// Clear old alert as the breach time has changed
 								models.ClearSLAAlertCache(existingAlert.ID)
@@ -177,7 +177,7 @@ func processTickets(tickets []zendesk.Ticket, slaData map[int64]SLAInfo, sseServ
 							slaLabel = label
 							// Log the SLA alert
 							logEntry := models.SLAAlertCache{
-								UserID:    int64(alert.UserID),
+								UserID:    int64(alert.User.ID),
 								TicketID:  ticket.ID,
 								AlertType: alert.AlertType,
 								BreachAt:  slaInfo.PolicyMetrics[0].BreachAt,
@@ -194,7 +194,7 @@ func processTickets(tickets []zendesk.Ticket, slaData map[int64]SLAInfo, sseServ
 					// Log the alert for the dashboard
 					timestamp := time.Now().Format("2006-01-02 15:04:05")
 					alertLog := models.AlertLog{
-						UserID:    int64(alert.UserID),
+						UserID:    int64(alert.User.ID),
 						TicketID:  ticket.ID,
 						Tag:       alert.Tag,
 						AlertType: alert.AlertType,

@@ -163,17 +163,46 @@ func processTickets(tickets []zendesk.Ticket, slaData map[int64]SLAInfo, sseServ
 				case "sla_deadline":
 					if slaInfo, ok := slaData[ticket.ID]; ok {
 						if label, matches := slaConditionMatches(slaInfo.PolicyMetrics); matches {
+							// Check existing alerts for this ticket and SLA category
+							existingAlert, found := models.GetSLAAlertCache(int64(alert.UserID), ticket.ID, alert.AlertType)
+							if found && existingAlert.BreachAt != slaInfo.PolicyMetrics[0].BreachAt {
+								// Clear old alert as the breach time has changed
+								models.ClearSLAAlertCache(existingAlert.ID)
+							} else if found {
+								// Skip sending duplicate alert
+								continue
+							}
+
 							sendAlert = true
-							slaLabel = label // Set the SLA label for the alert
+							slaLabel = label
+							// Log the SLA alert
+							logEntry := models.SLAAlertCache{
+								UserID:    int64(alert.UserID),
+								TicketID:  ticket.ID,
+								AlertType: alert.AlertType,
+								BreachAt:  slaInfo.PolicyMetrics[0].BreachAt,
+							}
+							if err := models.CreateSLAAlertCache(logEntry); err != nil {
+								fmt.Printf("Failed to log SLA alert for Ticket #%d: %v\n", ticket.ID, err)
+							}
 						}
 					}
 				}
 
 				if sendAlert {
 					logAlert(alert, ticket, alert.AlertType)
-
+					// Log the alert for the dashboard
+					timestamp := time.Now().Format("2006-01-02 15:04:05")
+					alertLog := models.AlertLog{
+						UserID:    int64(alert.UserID),
+						TicketID:  ticket.ID,
+						Tag:       alert.Tag,
+						AlertType: alert.AlertType,
+						Timestamp: timestamp,
+					}
+					models.CreateAlertLog(alertLog)
 					// Send the Slack message using the refactored function
-					slaInfo, _ := slaData[ticket.ID]
+					slaInfo := slaData[ticket.ID]
 					err := slackService.SendSlackMessage(alert.SlackChannelID, alert.AlertType, slaLabel, ticket, &slaInfo, alert.Tag)
 					if err != nil {
 						fmt.Printf("Failed to send Slack message for Ticket #%d: %v\n", ticket.ID, err)
@@ -236,31 +265,6 @@ func isUpdatedTicket(ticket zendesk.Ticket) bool {
 func logAlert(alert models.TagAlert, ticket zendesk.Ticket, alertType string) {
 	log.Printf("ALERT: [%s] Ticket #%d (Title: '%s') triggered an alert for tag '%s'\n",
 		alertType, ticket.ID, ticket.Subject, alert.Tag)
-}
-
-// SLAAlertTracker keeps track of which alerts have already been sent.
-type SLAAlertTracker struct {
-	Thresholds map[int64]map[string]bool // Map of ticket ID to threshold alerts
-}
-
-// NewSLAAlertTracker initializes an SLAAlertTracker
-func NewSLAAlertTracker() *SLAAlertTracker {
-	return &SLAAlertTracker{
-		Thresholds: make(map[int64]map[string]bool),
-	}
-}
-
-// HasAlerted checks if a ticket has already triggered an alert at the given threshold
-func (tracker *SLAAlertTracker) HasAlerted(ticketID int64, threshold string) bool {
-	if tracker.Thresholds[ticketID] == nil {
-		tracker.Thresholds[ticketID] = make(map[string]bool)
-	}
-	return tracker.Thresholds[ticketID][threshold]
-}
-
-// SetAlerted marks that a ticket has triggered an alert at the given threshold
-func (tracker *SLAAlertTracker) SetAlerted(ticketID int64, threshold string) {
-	tracker.Thresholds[ticketID][threshold] = true
 }
 
 // GetUserByID retrieves a user from Zendesk based on their ID.

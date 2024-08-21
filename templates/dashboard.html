@@ -3,8 +3,8 @@
   <div class="col-lg-6 grid-margin stretch-card">
     <div class="card">
       <div class="card-body">
-        <h4 class="card-title">Alert Frequency</h4>
-        {{if .HasAlertData}}
+        <h4 class="card-title">New Ticket Alerts</h4>
+        {{if .HasNewTicketData}}
         <canvas id="newTicketChart"></canvas>
         {{else}}
 <div class="alert alert-warning" role="alert">
@@ -17,8 +17,24 @@
   <div class="col-lg-6 grid-margin stretch-card">
     <div class="card">
       <div class="card-body">
+        <h4 class="card-title">Ticket Update Alerts</h4>
+        {{if .HasTicketUpdateData}}
+        <canvas id="ticketUpdateChart"></canvas>
+        {{else}}
+<div class="alert alert-warning" role="alert">
+    No data available to display.
+</div>
+{{end}}
+      </div>
+    </div>
+  </div>
+  </div>
+  <div class="row">
+  <div class="col-lg-6 grid-margin stretch-card">
+    <div class="card">
+      <div class="card-body">
         <h4 class="card-title">SLA Deadline Alerts</h4>
-        {{if .HasAlertData}}
+        {{if .HasSlaDeadlineData}}
         <canvas id="slaDeadlineChart"></canvas>
         {{else}}
 <div class="alert alert-warning" role="alert">
@@ -29,21 +45,26 @@
     </div>
   </div>
 </div>
-{{if .HasAlertData}}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-  // Example data passed via the backend
-  const newTicketData = {{ .NewTicketData }};
-  const slaDeadlineData = {{ .SlaDeadlineData }};
+   // Example data passed via the backend
+   const newTicketData = JSON.parse('{{.NewTicketData}}');
+  const slaDeadlineData = JSON.parse('{{.SlaDeadlineData}}');
+  const ticketUpdateData = JSON.parse('{{.TicketUpdateData}}');
 
   const ctxNewTicket = document.getElementById('newTicketChart').getContext('2d');
   const ctxSlaDeadline = document.getElementById('slaDeadlineChart').getContext('2d');
+  const ctxTicketUpdate = document.getElementById('ticketUpdateChart').getContext('2d');
 
-  // Initialize new ticket chart
-  new Chart(ctxNewTicket, {
+   // Initialize new ticket chart
+   new Chart(ctxNewTicket, {
     type: 'line',
     data: newTicketData,
     options: {
-      // Chart options here
+      scales: {
+        x: { beginAtZero: true },
+        y: { beginAtZero: true }
+      }
     }
   });
 
@@ -52,11 +73,24 @@
     type: 'line',
     data: slaDeadlineData,
     options: {
-      // Chart options here
+      scales: {
+        x: { beginAtZero: true },
+        y: { beginAtZero: true }
+      }
+    }
+  });
+
+  // Initialize Ticket update chart
+  new Chart(ctxTicketUpdate, {
+    type: 'line',
+    data: ticketUpdateData,
+    options: {
+      scales: {
+        x: { beginAtZero: true },
+        y: { beginAtZero: true }
+      }
     }
   });
 </script>
-{{else}}
-{{end}}
 
 {{end}}

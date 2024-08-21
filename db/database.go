@@ -56,10 +56,22 @@ func InitDB(filepath string) {
 	CREATE TABLE IF NOT EXISTS alert_logs (
 		id INTEGER PRIMARY KEY AUTOINCREMENT, 
 		user_id INTEGER NOT NULL,   
+		ticket_id INTEGER NOT NULL,
 		tag TEXT NOT NULL,  
 		alert_type TEXT NOT NULL,
-		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
 		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+	);`
+
+	createCacheTableSQL := `CREATE TABLE IF NOT EXISTS sla_alert_cache (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, -- Use INTEGER for AUTOINCREMENT
+    	user_id INT NOT NULL,
+    	ticket_id INT NOT NULL,
+    	alert_type VARCHAR(255) NOT NULL,
+    	breach_at TIMESTAMP NOT NULL,
+    	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, 
+    	UNIQUE(user_id, ticket_id, alert_type),
+    	FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 	);`
 
 	// Execute the SQL statements in sequence
@@ -68,6 +80,7 @@ func InitDB(filepath string) {
 		createTagsTableSQL,
 		createConfigTableSQL,
 		createAlertLogsTableSQL,
+		createCacheTableSQL,
 	}
 
 	for _, table := range tables {

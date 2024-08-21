@@ -61,11 +61,21 @@ func UpdateUser(user User) error {
 	return err
 }
 
+func UpdateSlackUserID(email string, slackUserID string) error {
+	query := `UPDATE users SET slack_user_id = ? WHERE email = ?`
+	_, err := db.Database.Exec(query, slackUserID, email)
+	if err != nil {
+		log.Printf("Error updating Slack User ID for email %s: %v", email, err)
+		return err
+	}
+	return nil
+}
+
 // GetUserByEmail retrieves a user by their email
 func GetUserByEmail(email string) (User, error) {
 	var user User
-	row := db.Database.QueryRow("SELECT id, email, name, role, daily_summary FROM users WHERE LOWER(email) = LOWER(?)", email)
-	err := row.Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.DailySummary)
+	row := db.Database.QueryRow("SELECT id, email, name, role, daily_summary, slack_user_id FROM users WHERE LOWER(email) = LOWER(?)", email)
+	err := row.Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.DailySummary, &user.SlackUserID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// Return a special error to indicate that the user was not found

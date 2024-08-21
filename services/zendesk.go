@@ -1,13 +1,22 @@
 package services
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/TylerConlee/TicketPulse/middlewares"
 	"github.com/TylerConlee/TicketPulse/models"
 	"github.com/nukosuke/go-zendesk/zendesk"
+)
+
+const (
+	AlertTypeNewTicket    = "new_ticket"
+	AlertTypeTicketUpdate = "ticket_update"
+	AlertTypeSLABreach    = "sla_breach"
 )
 
 type ZendeskClient struct {
@@ -39,6 +48,18 @@ type SatisfactionRating struct {
 	Comment   string `json:"comment"`
 	CreatedAt string `json:"created_at"`
 	TicketID  int64  `json:"ticket_id"`
+}
+
+// User represents a Zendesk user (expand with needed fields).
+type User struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// Organization represents a Zendesk organization (expand with needed fields).
+type Organization struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 // NewZendeskClient initializes a new ZendeskClient
@@ -121,7 +142,6 @@ func StartZendeskPolling(sseServer *middlewares.SSEServer, slackService *SlackSe
 	}
 }
 
-// processTickets processes the tickets, checking for SLA conditions, tag matches, and updates.
 func processTickets(tickets []zendesk.Ticket, slaData map[int64]SLAInfo, sseServer *middlewares.SSEServer, slackService *SlackService) {
 	for _, ticket := range tickets {
 		userAlerts, err := models.GetAllTagAlerts()
@@ -132,25 +152,19 @@ func processTickets(tickets []zendesk.Ticket, slaData map[int64]SLAInfo, sseServ
 
 		for _, alert := range userAlerts {
 			if tagMatches(alert.Tag, ticket.Tags) {
-				var alertMessage string
 				var sendAlert bool
+				var slaLabel string
 
 				switch alert.AlertType {
 				case "new_ticket":
-					if isNewTicket(ticket) {
-						alertMessage = fmt.Sprintf("New Ticket Alert: Ticket #%d (%s) matches tag '%s'", ticket.ID, ticket.Subject, alert.Tag)
-						sendAlert = true
-					}
+					sendAlert = isNewTicket(ticket)
 				case "ticket_update":
-					if isUpdatedTicket(ticket) {
-						alertMessage = fmt.Sprintf("Ticket Update Alert: Ticket #%d (%s) matches tag '%s'", ticket.ID, ticket.Subject, alert.Tag)
-						sendAlert = true
-					}
+					sendAlert = isUpdatedTicket(ticket)
 				case "sla_deadline":
 					if slaInfo, ok := slaData[ticket.ID]; ok {
 						if label, matches := slaConditionMatches(slaInfo.PolicyMetrics); matches {
-							alertMessage = fmt.Sprintf("SLA Deadline Alert: %s for Ticket #%d (%s) matches tag '%s'", label, ticket.ID, ticket.Subject, alert.Tag)
 							sendAlert = true
+							slaLabel = label // Set the SLA label for the alert
 						}
 					}
 				}
@@ -158,8 +172,9 @@ func processTickets(tickets []zendesk.Ticket, slaData map[int64]SLAInfo, sseServ
 				if sendAlert {
 					logAlert(alert, ticket, alert.AlertType)
 
-					// Send Slack message
-					err := slackService.SendMessage(alert.SlackChannelID, alertMessage)
+					// Send the Slack message using the refactored function
+					slaInfo, _ := slaData[ticket.ID]
+					err := slackService.SendSlackMessage(alert.SlackChannelID, alert.AlertType, slaLabel, ticket, &slaInfo, alert.Tag)
 					if err != nil {
 						fmt.Printf("Failed to send Slack message for Ticket #%d: %v\n", ticket.ID, err)
 					}
@@ -246,4 +261,79 @@ func (tracker *SLAAlertTracker) HasAlerted(ticketID int64, threshold string) boo
 // SetAlerted marks that a ticket has triggered an alert at the given threshold
 func (tracker *SLAAlertTracker) SetAlerted(ticketID int64, threshold string) {
 	tracker.Thresholds[ticketID][threshold] = true
+}
+
+// GetUserByID retrieves a user from Zendesk based on their ID.
+func (zc *ZendeskClient) GetRequesterByID(userID int64) (*User, error) {
+	endpoint := fmt.Sprintf("https://%s.zendesk.com/api/v2/users/%d.json", zc.Subdomain, userID)
+
+	req, err := http.NewRequestWithContext(context.Background(), "GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.SetBasicAuth(zc.Email+"/token", zc.APIToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("zendesk returned status %s", resp.Status)
+	}
+
+	var result struct {
+		User User `json:"user"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return &result.User, nil
+}
+
+// GetOrganizationByID retrieves an organization from Zendesk based on its ID.
+func (zc *ZendeskClient) GetOrganizationByID(organizationID int64) (*Organization, error) {
+	endpoint := fmt.Sprintf("https://%s.zendesk.com/api/v2/organizations/%d.json", zc.Subdomain, organizationID)
+
+	req, err := http.NewRequestWithContext(context.Background(), "GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.SetBasicAuth(zc.Email+"/token", zc.APIToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("zendesk returned status %s", resp.Status)
+	}
+
+	var result struct {
+		Organization Organization `json:"organization"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return &result.Organization, nil
+}
+
+func getSLALabel(ticket zendesk.Ticket, slaData map[int64]SLAInfo) string {
+	slaInfo, exists := slaData[ticket.ID]
+	if !exists || len(slaInfo.PolicyMetrics) == 0 {
+		return "No SLA"
+	}
+
+	// Assuming the first SLA policy metric is relevant for simplicity.
+	metric := slaInfo.PolicyMetrics[0]
+	return fmt.Sprintf("%s - %d hours %d minutes remaining", metric.Metric, metric.Hours, metric.Minutes)
 }

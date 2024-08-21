@@ -84,7 +84,8 @@ func initializeServices(startZenPollingChan, startSlackPollingChan chan struct{}
 	if err != nil {
 		log.Fatalf("Failed to initialize Slack service: %v", err)
 	}
-
+	// Start Slack Socket Mode
+	go slackService.StartSocketMode()
 	// Initialize DashboardService
 	dashboardService := services.NewDashboardService(db.GetDB())
 
@@ -189,7 +190,12 @@ func setupProtectedRoutes(r *mux.Router) *mux.Router {
 	protected.HandleFunc("/profile/update-summary-settings", func(w http.ResponseWriter, r *http.Request) {
 		handlers.ProfileHandler(w, r, Service.SlackService)
 	}).Methods("POST")
-	r.HandleFunc("/profile/summary/now", handlers.OnDemandSummaryHandler).Methods("GET")
+	protected.HandleFunc("/profile/update-profile", func(w http.ResponseWriter, r *http.Request) {
+		handlers.ProfileHandler(w, r, Service.SlackService)
+	}).Methods("POST")
+	protected.HandleFunc("/profile/summary/now", func(w http.ResponseWriter, r *http.Request) {
+		handlers.OnDemandSummaryHandler(w, r, Service.SlackService)
+	}).Methods("GET")
 
 	protected.HandleFunc("/settings", handlers.SettingsHandler).Methods("GET", "POST")
 	protected.HandleFunc("/logout", handlers.LogoutHandler).Methods("GET")

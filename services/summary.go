@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/TylerConlee/TicketPulse/models"
 	"github.com/nukosuke/go-zendesk/zendesk"
 )
 
@@ -318,15 +320,15 @@ func truncateDescription(desc string, wordCount int) string {
 	}
 	return desc
 }
-func (zc *ZendeskClient) GenerateDailySummary(userEmail string) (string, error) {
+func (zc *ZendeskClient) GenerateDailySummary(userEmail string, slackService *SlackService) (string, error) {
 	// Define the time range for the summary (e.g., last 24 hours)
 	now := time.Now()
 	since := now.Add(-24 * time.Hour)
 
-	// Step 1: Get the user ID from the email
+	// Step 1: Get the Zendesk user ID from the email
 	user, err := zc.GetUserByEmail(userEmail)
 	if err != nil {
-		return "", fmt.Errorf("failed to get user by email: %v", err)
+		return "", fmt.Errorf("failed to get Zendesk user by email: %v", err)
 	}
 
 	// Step 2: Retrieve tickets assigned to the user that were updated in the last 24 hours
@@ -354,7 +356,22 @@ func (zc *ZendeskClient) GenerateDailySummary(userEmail string) (string, error) 
 	openTicketsWithSLA := filterTicketsWithActiveSLA(tickets, slaData)
 
 	// Step 7: Compile the summary message
-	message := compileSummaryMessage(user.Name, unreadTickets, openTicketsWithSLA, csatRatings)
+	summaryMessage := compileSummaryMessage(user.Name, unreadTickets, openTicketsWithSLA, csatRatings)
 
-	return message, nil
+	// Step 8: Fetch the Slack user ID (assume you have a function for this)
+	slackUserID, err := models.GetUserByEmail(userEmail)
+	if err != nil {
+		return summaryMessage, fmt.Errorf("failed to get Slack user ID: %v", err)
+	}
+	if !slackUserID.SlackUserID.Valid {
+		return summaryMessage, fmt.Errorf("slack user ID is not set for user: %s", userEmail)
+	}
+	sUID := slackUserID.SlackUserID.String
+	// Step 9: Send the Slack message as a DM using block formatting
+	err = sendSlackDM(slackService, sUID, summaryMessage, unreadTickets, openTicketsWithSLA, csatRatings, slaData)
+	if err != nil {
+		log.Printf("failed to send Slack DM: %v", err)
+	}
+
+	return summaryMessage, nil
 }

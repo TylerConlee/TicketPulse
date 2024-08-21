@@ -51,7 +51,7 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *servic
 		return
 	}
 
-	if r.Method == "POST" && r.URL.Path == "/profile/update-slack-id" {
+	if r.Method == "POST" && r.URL.Path == "/profile/update-profile" {
 		// Handle Slack User ID update
 		if slackService.IsReady() {
 			slackEmail := r.FormValue("slack_email")
@@ -62,7 +62,7 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *servic
 			slackUserID, err := slackService.GetUserIDByEmail(slackEmail)
 			if err == nil {
 				user.SlackUserID = sql.NullString{String: slackUserID, Valid: true}
-				if err := models.UpdateUser(user); err != nil {
+				if err := models.UpdateSlackUserID(user.Email, user.SlackUserID.String); err != nil {
 					log.Printf("Error updating user Slack ID: %v", err)
 					http.Error(w, "Failed to update Slack ID", http.StatusInternalServerError)
 					return
@@ -150,7 +150,7 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *servic
 	}
 }
 
-func OnDemandSummaryHandler(w http.ResponseWriter, r *http.Request) {
+func OnDemandSummaryHandler(w http.ResponseWriter, r *http.Request, slackService *services.SlackService) {
 	session, _ := store.Get(r, "session-name")
 	userEmail, ok := session.Values["user_email"].(string)
 	if !ok || userEmail == "" {
@@ -166,12 +166,13 @@ func OnDemandSummaryHandler(w http.ResponseWriter, r *http.Request) {
 	// Create a new Zendesk client
 	zendeskClient := services.NewZendeskClient(subdomain, email, apiToken)
 
-	summary, err := zendeskClient.GenerateDailySummary(userEmail)
+	summary, err := zendeskClient.GenerateDailySummary(userEmail, slackService)
 	if err != nil {
+		log.Printf("Error generating summary: %v", err)
 		http.Error(w, "Failed to generate summary", http.StatusInternalServerError)
 		return
 	}
 
 	// Return the summary as JSON
-	json.NewEncoder(w).Encode(map[string]string{"summary": summary})
+	json.NewEncoder(w).Encode(map[string]string{"message": summary})
 }

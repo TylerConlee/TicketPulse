@@ -342,7 +342,7 @@ func sendSlackDM(slackService *SlackService, slackUserID string, summaryMessage 
 	if len(csatRatings) > 0 {
 		blocks = append(blocks, slack.NewSectionBlock(slack.NewTextBlockObject("mrkdwn", "*CSAT Ratings*:", false, false), nil, nil))
 		for _, csat := range csatRatings {
-			ratingInfo := fmt.Sprintf("• *%d/5* - %s\n", csat.Score, csat.Comment)
+			ratingInfo := fmt.Sprintf("• *%s/5* - %s\n", csat.Score, csat.Comment)
 			blocks = append(blocks, slack.NewSectionBlock(slack.NewTextBlockObject("mrkdwn", ratingInfo, false, false), nil, nil))
 		}
 		blocks = append(blocks, slack.NewDividerBlock())

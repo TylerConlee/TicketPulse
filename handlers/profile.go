@@ -12,21 +12,22 @@ import (
 
 	"github.com/TylerConlee/TicketPulse/models"
 	"github.com/TylerConlee/TicketPulse/services"
-
 	"github.com/gorilla/mux"
 )
 
-func ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *services.SlackService) {
+// ProfileHandler handles requests related to the user's profile.
+func (h *AppHandler) ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *services.SlackService) {
 	session, _ := store.Get(r, "session-name")
 	userID := session.Values["user_id"].(int)
 
 	// Retrieve the user from the database
-	user, err := models.GetUserByID(userID)
+	user, err := models.GetUserByID(h.DB, userID)
 	if err != nil {
 		log.Println("Error retrieving user:", err)
 		http.Error(w, "Unable to retrieve user", http.StatusInternalServerError)
 		return
 	}
+
 	// Handle sql.NullTime conversion to a string for display
 	summaryTime := ""
 	if user.SummaryTime.Valid {
@@ -41,9 +42,9 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *servic
 			http.Error(w, "Invalid time format", http.StatusBadRequest)
 			return
 		}
+
 		// Update user settings
-		err = user.UpdateDailySummarySettings(dailySummary, summaryTime)
-		if err != nil {
+		if err := user.UpdateDailySummarySettings(h.DB, dailySummary, summaryTime); err != nil {
 			http.Error(w, "Unable to update settings", http.StatusInternalServerError)
 			return
 		}
@@ -51,8 +52,8 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *servic
 		return
 	}
 
+	// Handle Slack User ID update
 	if r.Method == "POST" && r.URL.Path == "/profile/update-profile" {
-		// Handle Slack User ID update
 		if slackService.IsReady() {
 			slackEmail := r.FormValue("slack_email")
 			if slackEmail == "" {
@@ -62,7 +63,7 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *servic
 			slackUserID, err := slackService.GetUserIDByEmail(slackEmail)
 			if err == nil {
 				user.SlackUserID = sql.NullString{String: slackUserID, Valid: true}
-				if err := models.UpdateSlackUserID(user.Email, user.SlackUserID.String); err != nil {
+				if err := models.UpdateSlackUserID(h.DB, user.Email, user.SlackUserID.String); err != nil {
 					log.Printf("Error updating user Slack ID: %v", err)
 					http.Error(w, "Failed to update Slack ID", http.StatusInternalServerError)
 					return
@@ -81,8 +82,7 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *servic
 		slackChannelID := r.FormValue("slack_channel")
 		alertType := r.FormValue("alert_type")
 
-		err := models.CreateTagAlert(userID, tag, slackChannelID, alertType)
-		if err != nil {
+		if err := models.CreateTagAlert(h.DB, userID, tag, slackChannelID, alertType); err != nil {
 			http.Error(w, "Unable to add tag alert", http.StatusInternalServerError)
 			return
 		}
@@ -94,8 +94,7 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *servic
 	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/profile/delete-tag/") {
 		alertID, _ := strconv.Atoi(mux.Vars(r)["id"])
 
-		err := models.DeleteTagAlert(alertID)
-		if err != nil {
+		if err := models.DeleteTagAlert(h.DB, alertID); err != nil {
 			http.Error(w, "Unable to delete tag alert", http.StatusInternalServerError)
 			return
 		}
@@ -104,7 +103,7 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *servic
 	}
 
 	// Retrieve the user's tag alerts
-	tagAlerts, err := models.GetTagAlertsByUser(userID)
+	tagAlerts, err := models.GetTagAlertsByUser(h.DB, userID)
 	if err != nil {
 		http.Error(w, "Unable to retrieve tag alerts", http.StatusInternalServerError)
 		return
@@ -133,7 +132,7 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *servic
 	}
 
 	// Prepare common data for the template
-	data, err := getCommonData(r, "Profile")
+	data, err := h.getCommonData(r, "Profile")
 	if err != nil {
 		http.Error(w, "Unable to retrieve common data", http.StatusInternalServerError)
 		return
@@ -142,6 +141,7 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *servic
 	data["TagAlerts"] = tagAlerts
 	data["User"] = user
 	data["SummaryTime"] = summaryTime
+
 	// Render the template
 	t := template.Must(template.ParseFiles("templates/layout.html", "templates/profile.html"))
 	if err := t.ExecuteTemplate(w, "layout.html", data); err != nil {
@@ -150,7 +150,8 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request, slackService *servic
 	}
 }
 
-func OnDemandSummaryHandler(w http.ResponseWriter, r *http.Request, slackService *services.SlackService) {
+// OnDemandSummaryHandler handles the on-demand summary generation.
+func (h *AppHandler) OnDemandSummaryHandler(w http.ResponseWriter, r *http.Request, slackService *services.SlackService) {
 	session, _ := store.Get(r, "session-name")
 	userEmail, ok := session.Values["user_email"].(string)
 	if !ok || userEmail == "" {
@@ -158,13 +159,14 @@ func OnDemandSummaryHandler(w http.ResponseWriter, r *http.Request, slackService
 		return
 	}
 	log.Println("Generating on-demand summary for user:", userEmail)
-	// Retrieve Zendesk configuration from the database
-	subdomain, _ := models.GetConfiguration("zendesk_subdomain")
-	email, _ := models.GetConfiguration("zendesk_email")
-	apiToken, _ := models.GetConfiguration("zendesk_api_key")
 
 	// Create a new Zendesk client
-	zendeskClient := services.NewZendeskClient(subdomain, email, apiToken)
+	zendeskClient, err := services.NewZendeskClient(h.DB)
+	if err != nil {
+		log.Printf("Error creating Zendesk client: %v", err)
+		http.Error(w, "Failed to create Zendesk client", http.StatusInternalServerError)
+		return
+	}
 
 	summary, err := zendeskClient.GenerateDailySummary(userEmail, slackService)
 	if err != nil {

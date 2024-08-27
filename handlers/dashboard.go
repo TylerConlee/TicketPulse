@@ -1,5 +1,3 @@
-// handlers/dashboard.go
-
 package handlers
 
 import (
@@ -19,9 +17,9 @@ var funcMap = template.FuncMap{
 	"split":   strings.Split,
 }
 
-func DashboardHandler(dashboardService *services.DashboardService) http.HandlerFunc {
+// DashboardHandler handles requests to the dashboard and injects dependencies via AdminHandler.
+func (h *AppHandler) DashboardHandler(dashboardService *services.DashboardService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
 		// Extract user ID from the context
 		userID, ok := GetUserIDFromContext(r.Context())
 		if !ok || userID == 0 {
@@ -30,7 +28,7 @@ func DashboardHandler(dashboardService *services.DashboardService) http.HandlerF
 		}
 
 		// Get the user information from the database
-		user, err := models.GetUserByID(userID)
+		user, err := models.GetUserByID(h.DB, userID)
 		if err != nil {
 			log.Println("Error getting user information:", err)
 			http.Error(w, "Failed to get user information", http.StatusInternalServerError)
@@ -44,19 +42,19 @@ func DashboardHandler(dashboardService *services.DashboardService) http.HandlerF
 			http.Error(w, "Failed to get alert stats", http.StatusInternalServerError)
 			return
 		}
-		// Categorize and structure the stats by alert type
+
+		// Process stats for rendering in the dashboard
 		newTicketData := processAlertStatsForChart(stats, "new_ticket")
 		slaDeadlineData := processAlertStatsForChart(stats, "sla_deadline")
 		ticketUpdateData := processAlertStatsForChart(stats, "ticket_update")
 
-		// Convert structured data to JSON strings
+		// Convert data to JSON for use in JavaScript
 		newTicketDataJSON, _ := json.Marshal(newTicketData)
 		slaDeadlineDataJSON, _ := json.Marshal(slaDeadlineData)
 		ticketUpdateDataJSON, _ := json.Marshal(ticketUpdateData)
 
-		// Render the dashboard template with the data or a flag for no data
-
-		t := template.Must(template.ParseFiles("templates/layout.html", "templates/dashboard.html"))
+		// Render the dashboard template with the processed data
+		t := template.Must(template.New("layout.html").Funcs(funcMap).ParseFiles("templates/layout.html", "templates/dashboard.html"))
 		if err := t.ExecuteTemplate(w, "layout.html", map[string]interface{}{
 			"Title":               "Dashboard",
 			"AlertData":           stats,

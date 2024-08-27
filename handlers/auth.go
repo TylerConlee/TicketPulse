@@ -36,13 +36,7 @@ func init() {
 	}
 }
 
-func randomState() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	return base64.URLEncoding.EncodeToString(b)
-}
-
-func GoogleLoginHandler(w http.ResponseWriter, r *http.Request) {
+func (h *AppHandler) GoogleLoginHandler(w http.ResponseWriter, r *http.Request) {
 	state := randomState()
 	http.SetCookie(w, &http.Cookie{
 		Name:  "oauthstate",
@@ -52,7 +46,7 @@ func GoogleLoginHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
-func GoogleCallbackHandler(w http.ResponseWriter, r *http.Request) {
+func (h *AppHandler) GoogleCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	if err := validateOAuthState(r); err != nil {
 		log.Println("Invalid OAuth state:", err)
 		http.Redirect(w, r, "/login", http.StatusTemporaryRedirect)
@@ -66,7 +60,7 @@ func GoogleCallbackHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := getOrCreateUser(userInfo)
+	user, err := h.getOrCreateUser(userInfo)
 	if err != nil {
 		log.Println("Error handling user:", err)
 		http.Redirect(w, r, "/login", http.StatusTemporaryRedirect)
@@ -83,6 +77,12 @@ func GoogleCallbackHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Helper functions
+func randomState() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return base64.URLEncoding.EncodeToString(b)
+}
+
 func validateOAuthState(r *http.Request) error {
 	oauthState, err := r.Cookie("oauthstate")
 	if err != nil || r.FormValue("state") != oauthState.Value {
@@ -106,25 +106,25 @@ func fetchGoogleUserInfo(code string) (*oauth2api.Userinfo, error) {
 	return oauth2Service.Userinfo.Get().Do()
 }
 
-func getOrCreateUser(userInfo *oauth2api.Userinfo) (models.User, error) {
-	user, err := models.GetUserByEmail(userInfo.Email)
+func (h *AppHandler) getOrCreateUser(userInfo *oauth2api.Userinfo) (models.User, error) {
+	user, err := models.GetUserByEmail(h.DB, userInfo.Email)
 	if err != nil {
 		return models.User{}, err
 	}
 
 	if user.ID == 0 {
-		userCount, err := models.GetUserCount()
+		userCount, err := models.GetUserCount(h.DB)
 		if err != nil {
 			return models.User{}, err
 		}
 
 		if userCount == 0 {
 			log.Println("Creating first user as admin:", userInfo.Email)
-			if err := models.CreateUser(userInfo.Email, userInfo.Name, models.AdminRole, false); err != nil {
+			if err := models.CreateUser(h.DB, userInfo.Email, userInfo.Name, models.AdminRole, false); err != nil {
 				return models.User{}, err
 			}
 
-			user, err = models.GetUserByEmail(userInfo.Email)
+			user, err = models.GetUserByEmail(h.DB, userInfo.Email)
 			if err != nil {
 				return models.User{}, err
 			}

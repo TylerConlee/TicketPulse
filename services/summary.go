@@ -34,7 +34,6 @@ func (zc *ZendeskClient) SearchTicketsWithActiveSLA() ([]zendesk.Ticket, map[int
 		req.SetBasicAuth(zc.Email+"/token", zc.APIToken)
 		req.Header.Set("Content-Type", "application/json")
 
-		// Create a custom HTTP client and execute the request
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
@@ -92,7 +91,6 @@ func (zc *ZendeskClient) SearchNewOrUpdatedTickets(since time.Time) ([]zendesk.T
 		req.SetBasicAuth(zc.Email+"/token", zc.APIToken)
 		req.Header.Set("Content-Type", "application/json")
 
-		// Create a custom HTTP client and execute the request
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
@@ -138,7 +136,6 @@ func (zc *ZendeskClient) GetTicketsAssignedToUser(userID int64, since time.Time)
 		req.SetBasicAuth(zc.Email+"/token", zc.APIToken)
 		req.Header.Set("Content-Type", "application/json")
 
-		// Create a custom HTTP client and execute the request
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
@@ -181,7 +178,6 @@ func (zc *ZendeskClient) GetUserByEmail(email string) (*zendesk.User, error) {
 	req.SetBasicAuth(zc.Email+"/token", zc.APIToken)
 	req.Header.Set("Content-Type", "application/json")
 
-	// Create a custom HTTP client and execute the request
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -222,7 +218,6 @@ func (zc *ZendeskClient) GetCSATRatingsForUser(userID int64, since time.Time) ([
 	req.SetBasicAuth(zc.Email+"/token", zc.APIToken)
 	req.Header.Set("Content-Type", "application/json")
 
-	// Create a custom HTTP client and execute the request
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -242,6 +237,64 @@ func (zc *ZendeskClient) GetCSATRatingsForUser(userID int64, since time.Time) ([
 	}
 
 	return result.Results, nil
+}
+
+// GenerateDailySummary generates a daily summary and sends it to the user via Slack.
+func (zc *ZendeskClient) GenerateDailySummary(userEmail string, slackService *SlackService) (string, error) {
+	// Define the time range for the summary (e.g., last 24 hours)
+	now := time.Now()
+	since := now.Add(-24 * time.Hour)
+
+	// Step 1: Get the Zendesk user ID from the email
+	user, err := zc.GetUserByEmail(userEmail)
+	if err != nil {
+		return "", fmt.Errorf("failed to get Zendesk user by email: %v", err)
+	}
+
+	// Step 2: Retrieve tickets assigned to the user that were updated in the last 24 hours
+	tickets, err := zc.GetTicketsAssignedToUser(user.ID, since)
+	if err != nil {
+		return "", fmt.Errorf("failed to get tickets assigned to user: %v", err)
+	}
+
+	// Step 3: Retrieve SLA data for the tickets
+	_, slaData, err := zc.SearchTicketsWithActiveSLA()
+	if err != nil {
+		return "", fmt.Errorf("failed to get SLA data: %v", err)
+	}
+
+	// Step 4: Retrieve CSAT ratings for the user from the last 24 hours
+	csatRatings, err := zc.GetCSATRatingsForUser(user.ID, since)
+	if err != nil {
+		return "", fmt.Errorf("failed to get CSAT ratings for user: %v", err)
+	}
+
+	// Step 5: Identify unread tickets (tickets updated but not by the user)
+	unreadTickets := filterUnreadTickets(tickets, user.Email)
+
+	// Step 6: Identify open tickets with active SLAs
+	openTicketsWithSLA := filterTicketsWithActiveSLA(tickets, slaData)
+
+	// Step 7: Compile the summary message
+	summaryMessage := compileSummaryMessage(user.Name, unreadTickets, openTicketsWithSLA, csatRatings)
+
+	// Step 8: Fetch the Slack user ID (assume you have a function for this)
+	slackUserID, err := models.GetUserByEmail(zc.DB, userEmail)
+	if err != nil {
+		return summaryMessage, fmt.Errorf("failed to get Slack user ID: %v", err)
+	}
+	if !slackUserID.SlackUserID.Valid {
+		return summaryMessage, fmt.Errorf("slack user ID is not set for user: %s", userEmail)
+	}
+	sUID := slackUserID.SlackUserID.String
+
+	// Step 9: Send the Slack message as a DM using block formatting
+	err = sendSlackDM(slackService, sUID, summaryMessage, unreadTickets, openTicketsWithSLA, csatRatings, slaData)
+	if err != nil {
+		log.Printf("failed to send Slack DM: %v", err)
+	}
+
+	return summaryMessage, nil
 }
 
 // filterUnreadTickets filters unread tickets (those updated but not by the user).
@@ -319,59 +372,4 @@ func truncateDescription(desc string, wordCount int) string {
 		return strings.Join(words[:wordCount], " ") + "..."
 	}
 	return desc
-}
-func (zc *ZendeskClient) GenerateDailySummary(userEmail string, slackService *SlackService) (string, error) {
-	// Define the time range for the summary (e.g., last 24 hours)
-	now := time.Now()
-	since := now.Add(-24 * time.Hour)
-
-	// Step 1: Get the Zendesk user ID from the email
-	user, err := zc.GetUserByEmail(userEmail)
-	if err != nil {
-		return "", fmt.Errorf("failed to get Zendesk user by email: %v", err)
-	}
-
-	// Step 2: Retrieve tickets assigned to the user that were updated in the last 24 hours
-	tickets, err := zc.GetTicketsAssignedToUser(user.ID, since)
-	if err != nil {
-		return "", fmt.Errorf("failed to get tickets assigned to user: %v", err)
-	}
-
-	// Step 3: Retrieve SLA data for the tickets
-	_, slaData, err := zc.SearchTicketsWithActiveSLA()
-	if err != nil {
-		return "", fmt.Errorf("failed to get SLA data: %v", err)
-	}
-
-	// Step 4: Retrieve CSAT ratings for the user from the last 24 hours
-	csatRatings, err := zc.GetCSATRatingsForUser(user.ID, since)
-	if err != nil {
-		return "", fmt.Errorf("failed to get CSAT ratings for user: %v", err)
-	}
-
-	// Step 5: Identify unread tickets (tickets updated but not by the user)
-	unreadTickets := filterUnreadTickets(tickets, user.Email)
-
-	// Step 6: Identify open tickets with active SLAs
-	openTicketsWithSLA := filterTicketsWithActiveSLA(tickets, slaData)
-
-	// Step 7: Compile the summary message
-	summaryMessage := compileSummaryMessage(user.Name, unreadTickets, openTicketsWithSLA, csatRatings)
-
-	// Step 8: Fetch the Slack user ID (assume you have a function for this)
-	slackUserID, err := models.GetUserByEmail(userEmail)
-	if err != nil {
-		return summaryMessage, fmt.Errorf("failed to get Slack user ID: %v", err)
-	}
-	if !slackUserID.SlackUserID.Valid {
-		return summaryMessage, fmt.Errorf("slack user ID is not set for user: %s", userEmail)
-	}
-	sUID := slackUserID.SlackUserID.String
-	// Step 9: Send the Slack message as a DM using block formatting
-	err = sendSlackDM(slackService, sUID, summaryMessage, unreadTickets, openTicketsWithSLA, csatRatings, slaData)
-	if err != nil {
-		log.Printf("failed to send Slack DM: %v", err)
-	}
-
-	return summaryMessage, nil
 }

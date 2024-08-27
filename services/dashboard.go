@@ -3,14 +3,14 @@ package services
 import (
 	"log"
 
-	"github.com/jmoiron/sqlx"
+	"github.com/TylerConlee/TicketPulse/db"
 )
 
 type DashboardService struct {
-	db *sqlx.DB
+	db db.Database
 }
 
-func NewDashboardService(db *sqlx.DB) *DashboardService {
+func NewDashboardService(db db.Database) *DashboardService {
 	return &DashboardService{db: db}
 }
 

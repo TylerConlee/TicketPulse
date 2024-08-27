@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/TylerConlee/TicketPulse/db"
 	"github.com/TylerConlee/TicketPulse/middlewares"
 	"github.com/TylerConlee/TicketPulse/models"
 	"github.com/nukosuke/go-zendesk/zendesk"
@@ -19,6 +20,7 @@ type SlackService struct {
 	socketMode *socketmode.Client
 	ready      bool
 	sseServer  *middlewares.SSEServer
+	DB         db.Database
 }
 
 // SlackMessage represents a Slack Block Kit message payload.
@@ -49,15 +51,15 @@ type Action struct {
 	Value string `json:"value"`
 }
 
-func NewSlackService(sseServer *middlewares.SSEServer) (*SlackService, error) {
+func NewSlackService(db db.Database, sseServer *middlewares.SSEServer) (*SlackService, error) {
 	broadcastStatusUpdates(sseServer, "slack", "polling", "Connecting to Slack...")
-	botToken, err := models.GetConfiguration("slack_bot_token")
+	botToken, err := models.GetConfiguration(db, "slack_bot_token")
 	if err != nil || botToken == "" {
 		broadcastStatusUpdates(sseServer, "slack", "error", "Bot token not yet configured")
 		return nil, fmt.Errorf("slack bot token not configured")
 	}
 
-	appToken, err := models.GetConfiguration("slack_app_token")
+	appToken, err := models.GetConfiguration(db, "slack_app_token")
 	if err != nil || appToken == "" {
 		broadcastStatusUpdates(sseServer, "slack", "error", "App token not yet configured")
 		return nil, fmt.Errorf("slack app token not configured")
@@ -76,6 +78,7 @@ func NewSlackService(sseServer *middlewares.SSEServer) (*SlackService, error) {
 		socketMode: socketMode,
 		ready:      true,
 		sseServer:  sseServer,
+		DB:         db,
 	}, nil
 }
 
@@ -192,19 +195,14 @@ func (s *SlackService) HandleAcknowledge(callback slack.InteractionCallback) {
 
 func (s *SlackService) SendSlackMessage(channelID, alertType, slaLabel string, ticket zendesk.Ticket, slaInfo *SLAInfo, alertTag string) error {
 	// Fetch Zendesk subdomain for ticket URL
-	zendeskSubdomain, err := models.GetConfiguration("zendesk_subdomain")
+	zendeskSubdomain, err := models.GetConfiguration(s.DB, "zendesk_subdomain")
 	if err != nil || zendeskSubdomain == "" {
 		return fmt.Errorf("failed to retrieve Zendesk subdomain")
 	}
 	ticketURL := fmt.Sprintf("https://%s.zendesk.com/agent/tickets/%d", zendeskSubdomain, ticket.ID)
 
-	// Retrieve Zendesk configuration from the database
-	subdomain, _ := models.GetConfiguration("zendesk_subdomain")
-	email, _ := models.GetConfiguration("zendesk_email")
-	apiToken, _ := models.GetConfiguration("zendesk_api_key")
-
 	// Create a new Zendesk client
-	zc := NewZendeskClient(subdomain, email, apiToken)
+	zc, err := NewZendeskClient(s.DB)
 
 	// Get requester information
 	requesterName := "Unknown Requester"

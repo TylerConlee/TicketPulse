@@ -44,26 +44,26 @@ type TagAlert struct {
 }
 
 // CreateUser adds a new user to the database
-func CreateUser(email, name string, role Role, dailySummary bool) error {
+func CreateUser(db db.Database, email, name string, role Role, dailySummary bool) error {
 
-	_, err := db.Database.Exec(`INSERT INTO users (email, name, role, daily_summary ) VALUES (?, ?, ?, ?)`,
+	_, err := db.Exec(`INSERT INTO users (email, name, role, daily_summary ) VALUES (?, ?, ?, ?)`,
 		email, name, role, dailySummary)
 	return err
 }
 
 // UpdateUser updates a user's information in the database
-func UpdateUser(user User) error {
+func UpdateUser(db db.Database, user User) error {
 
-	_, err := db.Database.Exec(
+	_, err := db.Exec(
 		`UPDATE users SET name = ?, role = ?, daily_summary = ?, WHERE id = ?`,
 		user.Name, user.Role, user.DailySummary, user.ID,
 	)
 	return err
 }
 
-func UpdateSlackUserID(email string, slackUserID string) error {
+func UpdateSlackUserID(db db.Database, email string, slackUserID string) error {
 	query := `UPDATE users SET slack_user_id = ? WHERE email = ?`
-	_, err := db.Database.Exec(query, slackUserID, email)
+	_, err := db.Exec(query, slackUserID, email)
 	if err != nil {
 		log.Printf("Error updating Slack User ID for email %s: %v", email, err)
 		return err
@@ -72,9 +72,9 @@ func UpdateSlackUserID(email string, slackUserID string) error {
 }
 
 // GetUserByEmail retrieves a user by their email
-func GetUserByEmail(email string) (User, error) {
+func GetUserByEmail(db db.Database, email string) (User, error) {
 	var user User
-	row := db.Database.QueryRow("SELECT id, email, name, role, daily_summary, slack_user_id FROM users WHERE LOWER(email) = LOWER(?)", email)
+	row := db.QueryRow("SELECT id, email, name, role, daily_summary, slack_user_id FROM users WHERE LOWER(email) = LOWER(?)", email)
 	err := row.Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.DailySummary, &user.SlackUserID)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -87,8 +87,8 @@ func GetUserByEmail(email string) (User, error) {
 }
 
 // GetUserByID retrieves a user by their ID
-func GetUserByID(id int) (User, error) {
-	row := db.Database.QueryRow(`SELECT id, email, name, role, daily_summary, summary_time, slack_user_id FROM users WHERE id = ?`, id)
+func GetUserByID(db db.Database, id int) (User, error) {
+	row := db.QueryRow(`SELECT id, email, name, role, daily_summary, summary_time, slack_user_id FROM users WHERE id = ?`, id)
 	var user User
 
 	err := row.Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.DailySummary, &user.SummaryTime, &user.SlackUserID)
@@ -113,8 +113,8 @@ func GetUserByID(id int) (User, error) {
 }
 
 // GetAllUsers retrieves all users from the database
-func GetAllUsers() ([]User, error) {
-	rows, err := db.Database.Query("SELECT id, email, name, role, daily_summary FROM users")
+func GetAllUsers(db db.Database) ([]User, error) {
+	rows, err := db.Query("SELECT id, email, name, role, daily_summary FROM users")
 	if err != nil {
 		return nil, err
 	}
@@ -132,8 +132,8 @@ func GetAllUsers() ([]User, error) {
 	return users, nil
 }
 
-func IsFirstUser() bool {
-	row := db.Database.QueryRow("SELECT COUNT(*) FROM users")
+func IsFirstUser(db db.Database) bool {
+	row := db.QueryRow("SELECT COUNT(*) FROM users")
 	var count int
 	err := row.Scan(&count)
 	if err != nil {
@@ -142,9 +142,9 @@ func IsFirstUser() bool {
 	return count == 0
 }
 
-func GetFirstUserID() (int, error) {
+func GetFirstUserID(db db.Database) (int, error) {
 	var id int
-	err := db.Database.QueryRow("SELECT id FROM users ORDER BY id ASC LIMIT 1").Scan(&id)
+	err := db.QueryRow("SELECT id FROM users ORDER BY id ASC LIMIT 1").Scan(&id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return 0, nil // No users in the database
@@ -154,14 +154,14 @@ func GetFirstUserID() (int, error) {
 	return id, nil
 }
 
-func DeleteUserByID(userID int) error {
-	_, err := db.Database.Exec("DELETE FROM users WHERE id = ?", userID)
+func DeleteUserByID(db db.Database, userID int) error {
+	_, err := db.Exec("DELETE FROM users WHERE id = ?", userID)
 	return err
 }
 
-func GetUserCount() (int, error) {
+func GetUserCount(db db.Database) (int, error) {
 	var count int
-	err := db.Database.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
 	if err != nil {
 		return 0, err
 	}
@@ -169,15 +169,15 @@ func GetUserCount() (int, error) {
 }
 
 // CreateTagAlert adds a new tag alert configuration for a user
-func CreateTagAlert(userID int, tag, slackChannelID, alertType string) error {
-	_, err := db.Database.Exec(`INSERT INTO user_tag_alerts (user_id, tag, slack_channel_id, alert_type) VALUES (?, ?, ?, ?)`,
+func CreateTagAlert(db db.Database, userID int, tag, slackChannelID, alertType string) error {
+	_, err := db.Exec(`INSERT INTO user_tag_alerts (user_id, tag, slack_channel_id, alert_type) VALUES (?, ?, ?, ?)`,
 		userID, tag, slackChannelID, alertType)
 	return err
 }
 
 // GetTagAlertsByUser retrieves all tag alerts for a specific user
-func GetTagAlertsByUser(userID int) ([]TagAlert, error) {
-	rows, err := db.Database.Query(`SELECT id, user_id, tag, slack_channel_id, alert_type FROM user_tag_alerts WHERE user_id = ?`, userID)
+func GetTagAlertsByUser(db db.Database, userID int) ([]TagAlert, error) {
+	rows, err := db.Query(`SELECT id, user_id, tag, slack_channel_id, alert_type FROM user_tag_alerts WHERE user_id = ?`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -196,12 +196,12 @@ func GetTagAlertsByUser(userID int) ([]TagAlert, error) {
 }
 
 // DeleteTagAlert removes a specific tag alert configuration
-func DeleteTagAlert(alertID int) error {
-	_, err := db.Database.Exec(`DELETE FROM user_tag_alerts WHERE id = ?`, alertID)
+func DeleteTagAlert(db db.Database, alertID int) error {
+	_, err := db.Exec(`DELETE FROM user_tag_alerts WHERE id = ?`, alertID)
 	return err
 }
-func GetAllTagAlerts() ([]TagAlert, error) {
-	rows, err := db.Database.Query(`
+func GetAllTagAlerts(db db.Database) ([]TagAlert, error) {
+	rows, err := db.Query(`
 		SELECT 
 			uta.id, uta.tag, uta.slack_channel_id, uta.alert_type, 
 			u.id, u.name, u.email 
@@ -230,8 +230,8 @@ func GetAllTagAlerts() ([]TagAlert, error) {
 }
 
 // UpdateDailySummarySettings updates the user's daily summary settings.
-func (u *User) UpdateDailySummarySettings(dailySummary bool, summaryTime time.Time) error {
-	_, err := db.Database.Exec(`UPDATE users SET daily_summary = ?, summary_time = ? WHERE id = ?`, dailySummary, summaryTime, u.ID)
+func (u *User) UpdateDailySummarySettings(db db.Database, dailySummary bool, summaryTime time.Time) error {
+	_, err := db.Exec(`UPDATE users SET daily_summary = ?, summary_time = ? WHERE id = ?`, dailySummary, summaryTime, u.ID)
 	return err
 }
 

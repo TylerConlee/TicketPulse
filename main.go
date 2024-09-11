@@ -50,7 +50,7 @@ func main() {
 	r.Handle("/events", sseServer)
 
 	// Start the HTTP server
-	startServer(r, sseServer, startZenPollingChan, startSlackPollingChan)
+	startServer(r)
 }
 
 func initDatabase() {
@@ -188,7 +188,9 @@ func setupProtectedRoutes(r *mux.Router) *mux.Router {
 	protected.Use(handlers.AuthMiddleware)
 	protected.Use(middlewares.NotificationMiddleware)
 	appHandler := handlers.NewAppHandler(database)
-	protected.HandleFunc("/dashboard", appHandler.DashboardHandler(Service.DashboardService)).Methods("GET")
+	protected.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
+		appHandler.DashboardHandler(w, r, Service.DashboardService)
+	}).Methods("GET")
 	protected.HandleFunc("/profile", func(w http.ResponseWriter, r *http.Request) {
 		appHandler.ProfileHandler(w, r, Service.SlackService)
 	}).Methods("GET", "POST")
@@ -208,7 +210,6 @@ func setupProtectedRoutes(r *mux.Router) *mux.Router {
 		appHandler.OnDemandSummaryHandler(w, r, Service.SlackService)
 	}).Methods("GET")
 
-	protected.HandleFunc("/settings", appHandler.SettingsHandler).Methods("GET", "POST")
 	protected.HandleFunc("/logout", appHandler.LogoutHandler).Methods("GET")
 
 	return protected
@@ -228,7 +229,7 @@ func setupAdminRoutes(protected *mux.Router) {
 	admin.HandleFunc("/configuration", adminHandler.ConfigurationHandler).Methods("GET", "POST")
 }
 
-func startServer(r *mux.Router, sseServer *middlewares.SSEServer, startZenPollingChan, startSlackPollingChan chan struct{}) {
+func startServer(r *mux.Router) {
 	log.Println("Starting server on :8080...")
 	if err := http.ListenAndServe(":8080", r); err != nil {
 		log.Fatal("Server failed:", err)

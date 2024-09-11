@@ -17,13 +17,13 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		// Example: Get user ID from session or token
 		session, err := store.Get(r, "session-name")
 		if err != nil {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
 
 		userID, ok := session.Values["user_id"].(int)
 		if !ok {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
 
@@ -44,7 +44,7 @@ func AdminMiddleware(next http.Handler) http.Handler {
 		roleValue, exists := session.Values["role"]
 		if !exists {
 			log.Println("Role key does not exist in session")
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
 

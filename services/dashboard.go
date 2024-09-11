@@ -33,12 +33,13 @@ func (ds *DashboardService) GetAlertStatsForUser(userID int) ([]AlertStats, erro
 			alert_logs
 		WHERE 
 			user_id = $1
+			AND timestamp >= DATE('now', '-14 days')
 		GROUP BY 
 			DATE(timestamp), alert_type, tag
 		ORDER BY 
 			DATE(timestamp) ASC;
+	`
 
-    `
 	var stats []AlertStats
 	err := ds.db.Select(&stats, query, userID)
 	log.Println("Got alert stats for user", stats, err)

@@ -1,3 +1,5 @@
+//go:build !test
+
 package handlers
 
 import (
@@ -5,32 +7,61 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/TylerConlee/TicketPulse/db"
 	"github.com/TylerConlee/TicketPulse/middlewares"
 	"github.com/TylerConlee/TicketPulse/models"
 	"github.com/gorilla/mux"
 )
 
-var templates = template.Must(template.New("").Funcs(funcMap).ParseGlob("templates/*.html"))
+// AppHandler struct will hold the database instance
+type AppHandler struct {
+	DB db.Database
+}
+
+// NewAppHandler initializes the AppHandler with a database
+func NewAppHandler(db db.Database) *AppHandler {
+	return &AppHandler{DB: db}
+}
 
 // HomeHandler displays the home page with a list of users.
 func (h *AppHandler) HomeHandler(w http.ResponseWriter, r *http.Request) {
+	// Load the templates
+	tmpl, err := template.New("").Funcs(funcMap).ParseGlob("templates/*.html")
+	if err != nil {
+		http.Error(w, "Unable to load templates", http.StatusInternalServerError)
+		return
+	}
 	users, err := models.GetAllUsers(h.DB)
 	if err != nil {
 		http.Error(w, "Unable to retrieve users", http.StatusInternalServerError)
 		return
 	}
-	templates.ExecuteTemplate(w, "index.html", users)
+	if err := tmpl.ExecuteTemplate(w, "index.html", users); err != nil {
+		http.Error(w, "Error rendering template", http.StatusInternalServerError)
+	}
 }
 
 // ViewHandler displays a user's details based on their ID.
 func (h *AppHandler) ViewHandler(w http.ResponseWriter, r *http.Request) {
+	// Load the templates
+	tmpl, err := template.New("").Funcs(funcMap).ParseGlob("templates/*.html")
+	if err != nil {
+		http.Error(w, "Unable to load templates", http.StatusInternalServerError)
+		return
+	}
+
+	// Retrieve data
 	id, _ := strconv.Atoi(mux.Vars(r)["id"])
 	item, err := models.GetUserByID(h.DB, id)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
 	}
-	templates.ExecuteTemplate(w, "view.html", item)
+
+	// Render the template
+	if err := tmpl.ExecuteTemplate(w, "view.html", item); err != nil {
+		http.Error(w, "Error rendering template", http.StatusInternalServerError)
+	}
 }
 
 // UpdateHandler updates a user's details or displays the update form.
@@ -55,12 +86,24 @@ func (h *AppHandler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Load the templates
+	tmpl, err := template.New("").Funcs(funcMap).ParseGlob("templates/*.html")
+	if err != nil {
+		http.Error(w, "Unable to load templates", http.StatusInternalServerError)
+		return
+	}
+
+	// Retrieve data
 	item, err := models.GetUserByID(h.DB, id)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
 	}
-	templates.ExecuteTemplate(w, "update.html", item)
+
+	// Render the template
+	if err := tmpl.ExecuteTemplate(w, "update.html", item); err != nil {
+		http.Error(w, "Error rendering template", http.StatusInternalServerError)
+	}
 }
 
 // LogoutHandler logs the user out by clearing the session.

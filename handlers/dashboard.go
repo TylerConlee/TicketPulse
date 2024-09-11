@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/TylerConlee/TicketPulse/models"
 	"github.com/TylerConlee/TicketPulse/services"
 )
 
@@ -18,58 +17,57 @@ var funcMap = template.FuncMap{
 }
 
 // DashboardHandler handles requests to the dashboard and injects dependencies via AdminHandler.
-func (h *AppHandler) DashboardHandler(dashboardService *services.DashboardService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Extract user ID from the context
-		userID, ok := GetUserIDFromContext(r.Context())
-		if !ok || userID == 0 {
-			http.Error(w, "User not found", http.StatusUnauthorized)
-			return
-		}
+func (h *AppHandler) DashboardHandler(w http.ResponseWriter, r *http.Request, dashboardService *services.DashboardService) {
 
-		// Get the user information from the database
-		user, err := models.GetUserByID(h.DB, userID)
-		if err != nil {
-			log.Println("Error getting user information:", err)
-			http.Error(w, "Failed to get user information", http.StatusInternalServerError)
-			return
-		}
-
-		// Retrieve alert stats for the user
-		stats, err := dashboardService.GetAlertStatsForUser(userID)
-		if err != nil {
-			log.Println("Error getting alert stats:", err)
-			http.Error(w, "Failed to get alert stats", http.StatusInternalServerError)
-			return
-		}
-
-		// Process stats for rendering in the dashboard
-		newTicketData := processAlertStatsForChart(stats, "new_ticket")
-		slaDeadlineData := processAlertStatsForChart(stats, "sla_deadline")
-		ticketUpdateData := processAlertStatsForChart(stats, "ticket_update")
-
-		// Convert data to JSON for use in JavaScript
-		newTicketDataJSON, _ := json.Marshal(newTicketData)
-		slaDeadlineDataJSON, _ := json.Marshal(slaDeadlineData)
-		ticketUpdateDataJSON, _ := json.Marshal(ticketUpdateData)
-
-		// Render the dashboard template with the processed data
-		t := template.Must(template.New("layout.html").Funcs(funcMap).ParseFiles("templates/layout.html", "templates/dashboard.html"))
-		if err := t.ExecuteTemplate(w, "layout.html", map[string]interface{}{
-			"Title":               "Dashboard",
-			"AlertData":           stats,
-			"User":                user,
-			"HasNewTicketData":    len(newTicketData) > 0,
-			"HasTicketUpdateData": len(ticketUpdateData) > 0,
-			"HasSlaDeadlineData":  len(slaDeadlineData) > 0,
-			"NewTicketData":       template.JS(newTicketDataJSON),
-			"SlaDeadlineData":     template.JS(slaDeadlineDataJSON),
-			"TicketUpdateData":    template.JS(ticketUpdateDataJSON),
-		}); err != nil {
-			log.Printf("Error rendering template: %v", err)
-			http.Error(w, "Unable to render template", http.StatusInternalServerError)
-		}
+	// Extract user ID from the context
+	userID, ok := GetUserIDFromContext(r.Context())
+	if !ok || userID == 0 {
+		http.Error(w, "User not found", http.StatusUnauthorized)
+		return
 	}
+
+	// Retrieve alert stats for the user
+	stats, err := dashboardService.GetAlertStatsForUser(userID)
+	if err != nil {
+		log.Println("Error getting alert stats:", err)
+		http.Error(w, "Failed to get alert stats", http.StatusInternalServerError)
+		return
+	}
+
+	// Process stats for rendering in the dashboard
+	newTicketData := processAlertStatsForChart(stats, "new_ticket")
+	slaDeadlineData := processAlertStatsForChart(stats, "sla_deadline")
+	ticketUpdateData := processAlertStatsForChart(stats, "ticket_update")
+
+	// Convert data to JSON for use in JavaScript
+	newTicketDataJSON, _ := json.Marshal(newTicketData)
+	slaDeadlineDataJSON, _ := json.Marshal(slaDeadlineData)
+	ticketUpdateDataJSON, _ := json.Marshal(ticketUpdateData)
+
+	data, err := h.getCommonData(r, "Dashboard")
+	if err != nil {
+		http.Error(w, "Unable to retrieve common data", http.StatusInternalServerError)
+		return
+	}
+
+	// Render the dashboard template with the processed data
+	t := template.Must(template.New("layout.html").Funcs(funcMap).ParseFiles("templates/layout.html", "templates/dashboard.html"))
+	if err := t.ExecuteTemplate(w, "layout.html", map[string]interface{}{
+		"Title":               data["Title"],
+		"AlertData":           stats,
+		"User":                data["User"],
+		"HasNewTicketData":    len(newTicketData) > 0,
+		"HasTicketUpdateData": len(ticketUpdateData) > 0,
+		"HasSlaDeadlineData":  len(slaDeadlineData) > 0,
+		"NewTicketData":       template.JS(newTicketDataJSON),
+		"SlaDeadlineData":     template.JS(slaDeadlineDataJSON),
+		"TicketUpdateData":    template.JS(ticketUpdateDataJSON),
+		"Notifications":       data["Notifications"],
+	}); err != nil {
+		log.Printf("Error rendering template: %v", err)
+		http.Error(w, "Unable to render template", http.StatusInternalServerError)
+	}
+
 }
 
 // processAlertStatsForChart transforms the AlertStats data into a Chart.js-compatible format.

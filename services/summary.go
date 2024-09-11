@@ -289,7 +289,7 @@ func (zc *ZendeskClient) GenerateDailySummary(userEmail string, slackService *Sl
 	sUID := slackUserID.SlackUserID.String
 
 	// Step 9: Send the Slack message as a DM using block formatting
-	err = sendSlackDM(slackService, sUID, summaryMessage, unreadTickets, openTicketsWithSLA, csatRatings, slaData)
+	err = sendSlackDM(slackService, sUID, unreadTickets, openTicketsWithSLA, csatRatings, slaData)
 	if err != nil {
 		log.Printf("failed to send Slack DM: %v", err)
 	}

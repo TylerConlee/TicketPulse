@@ -203,6 +203,9 @@ func (s *SlackService) SendSlackMessage(channelID, alertType, slaLabel string, t
 
 	// Create a new Zendesk client
 	zc, err := NewZendeskClient(s.DB)
+	if err != nil {
+		return fmt.Errorf("failed to create Zendesk client: %v", err)
+	}
 
 	// Get requester information
 	requesterName := "Unknown Requester"
@@ -309,7 +312,7 @@ func broadcastStatusUpdates(sseServer *middlewares.SSEServer, service, status, e
 	sseServer.NotifyAll(string(message))
 }
 
-func sendSlackDM(slackService *SlackService, slackUserID string, summaryMessage string, unreadTickets []zendesk.Ticket, openTicketsWithSLA []zendesk.Ticket, csatRatings []SatisfactionRating, slaData map[int64]SLAInfo) error {
+func sendSlackDM(slackService *SlackService, slackUserID string, unreadTickets []zendesk.Ticket, openTicketsWithSLA []zendesk.Ticket, csatRatings []SatisfactionRating, slaData map[int64]SLAInfo) error {
 	blocks := []slack.Block{
 		slack.NewSectionBlock(slack.NewTextBlockObject("mrkdwn", "*Your Daily Summary*", false, false), nil, nil),
 		slack.NewDividerBlock(),

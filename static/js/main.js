@@ -7,29 +7,36 @@ function toggleMenu() {
     main.classList.toggle("shifted");
 }
 
-document.getElementById("getSummaryNowBtn").addEventListener("click", function() {
-    const summaryModalContent = document.getElementById("summaryModalContent");
-    summaryModalContent.innerHTML = "Loading...";
+const getSummaryNowBtn = document.getElementById("getSummaryNowBtn");
 
-    fetch("/profile/summary/now", {
-        method: "GET",
-        headers: {
-            "Accept": "application/json",
+if (getSummaryNowBtn) {  // Check if the element exists
+    getSummaryNowBtn.addEventListener("click", function() {
+        const summaryModalContent = document.getElementById("summaryModalContent");
+        if (summaryModalContent) {  // Ensure this element also exists
+            summaryModalContent.innerHTML = "Loading...";
+
+            fetch("/profile/summary/now", {
+                method: "GET",
+                headers: {
+                    "Accept": "application/json",
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.message) {
+                    summaryModalContent.innerHTML = `<pre>${data.message}</pre>`;
+                } else {
+                    summaryModalContent.innerHTML = "Failed to load summary.";
+                }
+            })
+            .catch(error => {
+                console.error("Error fetching summary:", error);
+                summaryModalContent.innerHTML = "An error occurred while loading the summary.";
+            });
         }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.message) {
-            summaryModalContent.innerHTML = `<pre>${data.message}</pre>`;
-        } else {
-            summaryModalContent.innerHTML = "Failed to load summary.";
-        }
-    })
-    .catch(error => {
-        console.error("Error fetching summary:", error);
-        summaryModalContent.innerHTML = "An error occurred while loading the summary.";
     });
-});
+}
+
 
 // Handle incoming SSE events
 const eventSource = new EventSource("/events");

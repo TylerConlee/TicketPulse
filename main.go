@@ -31,7 +31,6 @@ func main() {
 	// Initialize the application
 	initDatabase()
 	loadEnvVariables()
-	envCheck()
 
 	// Initialize the SlackService and DashboardService before setting up routes
 	startZenPollingChan := make(chan struct{})
@@ -65,13 +64,9 @@ func initDatabase() {
 func loadEnvVariables() {
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-}
-
-func envCheck() {
-	if os.Getenv("GOOGLE_CLIENT_ID") == "" || os.Getenv("GOOGLE_CLIENT_SECRET") == "" {
-		log.Fatal("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set")
+		if os.Getenv("GOOGLE_CLIENT_ID") == "" || os.Getenv("GOOGLE_CLIENT_SECRET") == "" {
+			log.Fatal("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set")
+		}
 	}
 }
 

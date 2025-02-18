@@ -1,32 +1,35 @@
-# Use the official Golang image as the builder
-FROM golang:1.23 as builder
+# Build Stage
+FROM golang:1.23 AS builder
 
-# Set the working directory inside the container
 WORKDIR /app
 
-# Copy the go mod and sum files
+# Copy dependency files and download dependencies
 COPY go.mod go.sum ./
-
-# Download dependencies
 RUN go mod download
 
-# Copy the rest of the application source code
+# Copy the rest of the source code
 COPY . .
 
-# Build the application binary
-RUN go build -o /ticketpulse
+# Ensure the binary is statically compiled for Alpine by disabling CGO,
+# and reduce binary size with linker flags. Also, explicitly build the package in the current directory.
+ENV CGO_ENABLED=0
+RUN go build -ldflags="-s -w" -o ticketpulse .
 
-# Use a minimal base image to run the application
-FROM alpine:latest
+# Final Stage
+FROM alpine:3.18
 
-# Set the working directory
-WORKDIR /root/
+# Create a non-root user for security
+RUN adduser -D appuser
+WORKDIR /home/appuser
 
-# Copy the built binary from the builder stage
-COPY --from=builder /ticketpulse .
+# Copy the statically built binary from the builder stage
+COPY --from=builder /app/ticketpulse .
 
 # Expose the application port
 EXPOSE 8080
+
+# Switch to the non-root user
+USER appuser
 
 # Run the application
 CMD ["./ticketpulse"]

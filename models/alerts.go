@@ -15,16 +15,17 @@ type SLAAlertCache struct {
 	AlertType string    `db:"alert_type"`
 	BreachAt  time.Time `db:"breach_at"`
 	CreatedAt time.Time `db:"created_at"`
+	Label     string    `db:"label"`
 }
 
 // CreateSLAAlertCache inserts a new entry into the sla_alert_cache table.
 func CreateSLAAlertCache(ctx context.Context, db db.Database, cacheEntry SLAAlertCache) error {
 	query := `
-        INSERT INTO sla_alert_cache (user_id, ticket_id, alert_type, breach_at)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO sla_alert_cache (user_id, ticket_id, alert_type, breach_at, label)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING id
     `
-	err := db.QueryRowContext(ctx, query, cacheEntry.UserID, cacheEntry.TicketID, cacheEntry.AlertType, cacheEntry.BreachAt).Scan(&cacheEntry.ID)
+	err := db.QueryRowContext(ctx, query, cacheEntry.UserID, cacheEntry.TicketID, cacheEntry.AlertType, cacheEntry.BreachAt, cacheEntry.Label).Scan(&cacheEntry.ID)
 	if err != nil {
 		return fmt.Errorf("failed to create SLA alert cache entry: %w", err)
 	}
@@ -35,8 +36,8 @@ func CreateSLAAlertCache(ctx context.Context, db db.Database, cacheEntry SLAAler
 // GetSLAAlertCache retrieves an SLA alert cache entry by user, ticket, and alert type.
 func GetSLAAlertCache(ctx context.Context, db db.Database, userID, ticketID int, alertType string) (*SLAAlertCache, error) {
 	var cacheEntry SLAAlertCache
-	query := `SELECT id, user_id, ticket_id, alert_type, breach_at, created_at FROM sla_alert_cache WHERE user_id = $1 AND ticket_id = $2 AND alert_type = $3`
-	err := db.QueryRowContext(ctx, query, userID, ticketID, alertType).Scan(&cacheEntry.ID, &cacheEntry.UserID, &cacheEntry.TicketID, &cacheEntry.AlertType, &cacheEntry.BreachAt, &cacheEntry.CreatedAt)
+	query := `SELECT id, user_id, ticket_id, alert_type, breach_at, created_at, label FROM sla_alert_cache WHERE user_id = $1 AND ticket_id = $2 AND alert_type = $3`
+	err := db.QueryRowContext(ctx, query, userID, ticketID, alertType).Scan(&cacheEntry.ID, &cacheEntry.UserID, &cacheEntry.TicketID, &cacheEntry.AlertType, &cacheEntry.BreachAt, &cacheEntry.CreatedAt, &cacheEntry.Label)
 	if err != nil {
 		return nil, err
 	}

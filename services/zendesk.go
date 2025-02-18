@@ -17,7 +17,7 @@ import (
 const (
 	AlertTypeNewTicket    = "new_ticket"
 	AlertTypeTicketUpdate = "ticket_update"
-	AlertTypeSLABreach    = "sla_breach"
+	AlertTypeSLABreach    = "sla_deadline"
 )
 
 type ZendeskClient struct {
@@ -143,8 +143,10 @@ func StartZendeskPolling(ctx context.Context, db db.Database, sseServer *middlew
 
 func processTickets(ctx context.Context, db db.Database, tickets []zendesk.Ticket, slaData map[int64]SLAInfo, sseServer *middlewares.SSEServer, slackService *SlackService) {
 
+	userAlerts, err := models.GetAllTagAlerts(db)
+	log.Printf("Processing %d tickets...\n", len(tickets))
 	for _, ticket := range tickets {
-		userAlerts, err := models.GetAllTagAlerts(db)
+
 		if err != nil {
 			fmt.Println("Error fetching user alerts:", err)
 			continue
@@ -154,6 +156,8 @@ func processTickets(ctx context.Context, db db.Database, tickets []zendesk.Ticke
 			if tagMatches(alert.Tag, ticket.Tags) {
 				var sendAlert bool
 				var slaLabel string
+				var msgColor string  // Slack color for SLA alerts
+				msgColor = "#3498DB" // Default color for SLA alerts
 
 				switch alert.AlertType {
 				case AlertTypeNewTicket:
@@ -161,11 +165,13 @@ func processTickets(ctx context.Context, db db.Database, tickets []zendesk.Ticke
 				case AlertTypeTicketUpdate:
 					sendAlert = isUpdatedTicket(ticket)
 				case AlertTypeSLABreach:
+
 					if slaInfo, ok := slaData[ticket.ID]; ok {
-						if label, matches := slaConditionMatches(slaInfo.PolicyMetrics); matches {
+						if label, color, matches := slaConditionMatches(slaInfo.PolicyMetrics); matches {
+							msgColor = color
 							// Correct the argument types and pass *sql.DB
 							existingAlert, err := models.GetSLAAlertCache(ctx, db, int(alert.User.ID), int(ticket.ID), alert.AlertType)
-							if err == nil && existingAlert.BreachAt != slaInfo.PolicyMetrics[0].BreachAt {
+							if err == nil && existingAlert.BreachAt != slaInfo.PolicyMetrics[0].BreachAt && existingAlert.Label != label {
 								models.ClearSLAAlertCache(ctx, db, existingAlert.ID)
 							} else if err == nil {
 								continue
@@ -180,6 +186,7 @@ func processTickets(ctx context.Context, db db.Database, tickets []zendesk.Ticke
 								TicketID:  int64(ticket.ID),     // Use int type
 								AlertType: alert.AlertType,
 								BreachAt:  slaInfo.PolicyMetrics[0].BreachAt,
+								Label:     slaLabel,
 							}
 							if err := models.CreateSLAAlertCache(ctx, db, logEntry); err != nil {
 								fmt.Printf("Failed to log SLA alert for Ticket #%d: %v\n", ticket.ID, err)
@@ -200,7 +207,7 @@ func processTickets(ctx context.Context, db db.Database, tickets []zendesk.Ticke
 					}
 					models.CreateAlertLog(ctx, db, alertLog)
 					slaInfo := slaData[ticket.ID]
-					err := slackService.SendSlackMessage(alert.SlackChannelID, alert.AlertType, slaLabel, ticket, &slaInfo, alert.Tag)
+					err := slackService.SendSlackMessage(alert.SlackChannelID, alert.AlertType, slaLabel, ticket, &slaInfo, alert.Tag, msgColor)
 					if err != nil {
 						fmt.Printf("Failed to send Slack message for Ticket #%d: %v\n", ticket.ID, err)
 					}
@@ -212,28 +219,28 @@ func processTickets(ctx context.Context, db db.Database, tickets []zendesk.Ticke
 }
 
 // slaConditionMatches checks if the SLA condition matches the threshold for sending alerts.
-func slaConditionMatches(slaMetrics []SLAPolicyMetric) (string, bool) {
+func slaConditionMatches(slaMetrics []SLAPolicyMetric) (string, string, bool) {
 	for _, metric := range slaMetrics {
 		if metric.Stage == "active" {
 			timeRemaining := time.Until(metric.BreachAt)
 			if timeRemaining < 0 {
-				return "SLA Breached", true
+				return "SLA Breached", "#FF0000", true // Red for breached SLA
 			}
 			switch {
 			case timeRemaining <= 3*time.Hour && timeRemaining > 2*time.Hour:
-				return "Less than 3 hours remaining", true
+				return "Less than 3 hours remaining", "#3498DB", true // Blue
 			case timeRemaining <= 2*time.Hour && timeRemaining > 1*time.Hour:
-				return "Less than 2 hours remaining", true
+				return "Less than 2 hours remaining", "#F1C40F", true // Yellow
 			case timeRemaining <= 1*time.Hour && timeRemaining > 30*time.Minute:
-				return "Less than 1 hour remaining", true
+				return "Less than 1 hour remaining", "#FFA500", true // Orange
 			case timeRemaining <= 30*time.Minute && timeRemaining > 15*time.Minute:
-				return "Less than 30 minutes remaining", true
+				return "Less than 30 minutes remaining", "#FF8C00", true // Darker Orange
 			case timeRemaining <= 15*time.Minute:
-				return "Less than 15 minutes remaining", true
+				return "Less than 15 minutes remaining", "#FF0000", true // Red
 			}
 		}
 	}
-	return "", false
+	return "", "", false
 }
 
 // Helper function to check if a tag matches.

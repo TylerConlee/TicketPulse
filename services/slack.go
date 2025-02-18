@@ -51,6 +51,8 @@ type Action struct {
 	Value string `json:"value"`
 }
 
+var allChannels []slack.Channel
+
 func NewSlackService(db db.Database, sseServer *middlewares.SSEServer) (*SlackService, error) {
 	broadcastStatusUpdates(sseServer, "slack", "polling", "Connecting to Slack...")
 	botToken, err := models.GetConfiguration(db, "slack_bot_token")
@@ -73,6 +75,27 @@ func NewSlackService(db db.Database, sseServer *middlewares.SSEServer) (*SlackSe
 	broadcastStatusUpdates(sseServer, "slack", "connected", "")
 	socketMode := socketmode.New(client)
 
+	params := &slack.GetConversationsParameters{
+		ExcludeArchived: true,
+		Types:           []string{"public_channel", "private_channel"},
+		Limit:           100,
+	}
+
+	for {
+		channels, nextCursor, err := client.GetConversations(params)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get Slack conversations: %w", err)
+		}
+
+		allChannels = append(allChannels, channels...)
+
+		if nextCursor == "" {
+			break
+		}
+
+		params.Cursor = nextCursor
+		time.Sleep(1 * time.Second)
+	}
 	return &SlackService{
 		client:     client,
 		socketMode: socketMode,
@@ -88,27 +111,6 @@ func (s *SlackService) IsReady() bool {
 }
 
 func (s *SlackService) GetConversations() ([]slack.Channel, error) {
-	var allChannels []slack.Channel
-	params := &slack.GetConversationsParameters{
-		ExcludeArchived: true,
-		Types:           []string{"public_channel", "private_channel"},
-		Limit:           100,
-	}
-
-	for {
-		channels, nextCursor, err := s.client.GetConversations(params)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get Slack conversations: %w", err)
-		}
-
-		allChannels = append(allChannels, channels...)
-
-		if nextCursor == "" {
-			break
-		}
-
-		params.Cursor = nextCursor
-	}
 
 	return allChannels, nil
 }
@@ -173,13 +175,11 @@ func (s *SlackService) HandleAcknowledge(callback slack.InteractionCallback) {
 	// Initialize a new slice to store the blocks
 	var newBlocks []slack.Block
 
-	// Iterate over the existing blocks to keep only the first section block
+	// Iterate over the existing blocks to keep all non-action blocks
 	for _, block := range callback.Message.Blocks.BlockSet {
-		// If it's a section block and newBlocks is empty, keep it
-		if sectionBlock, ok := block.(*slack.SectionBlock); ok {
-			if len(newBlocks) == 0 {
-				newBlocks = append(newBlocks, sectionBlock)
-			}
+		// Keep everything except the action block
+		if _, ok := block.(*slack.ActionBlock); !ok {
+			newBlocks = append(newBlocks, block)
 		}
 	}
 
@@ -193,7 +193,7 @@ func (s *SlackService) HandleAcknowledge(callback slack.InteractionCallback) {
 	}
 }
 
-func (s *SlackService) SendSlackMessage(channelID, alertType, slaLabel string, ticket zendesk.Ticket, slaInfo *SLAInfo, alertTag string) error {
+func (s *SlackService) SendSlackMessage(channelID, alertType, slaLabel string, ticket zendesk.Ticket, slaInfo *SLAInfo, alertTag string, color string) error {
 	// Fetch Zendesk subdomain for ticket URL
 	zendeskSubdomain, err := models.GetConfiguration(s.DB, "zendesk_subdomain")
 	if err != nil || zendeskSubdomain == "" {
@@ -237,32 +237,53 @@ func (s *SlackService) SendSlackMessage(channelID, alertType, slaLabel string, t
 	var alertHeader, alertDescription string
 	switch alertType {
 	case "new_ticket":
-		alertHeader = "*New Ticket Alert*"
+		alertHeader = ":new: *New Ticket Alert*"
 		alertDescription = fmt.Sprintf("A new ticket has been created: *%s*", ticket.Subject)
 	case "ticket_update":
-		alertHeader = "*Ticket Update Alert*"
+		alertHeader = ":memo: *Ticket Update Alert*"
 		alertDescription = fmt.Sprintf("An update has been made to the ticket: *%s*", ticket.Subject)
 	case "sla_deadline":
-		alertHeader = "*SLA Breach Warning*"
+		alertHeader = ":rotating_light: *SLA Breach Warning*"
 		alertDescription = fmt.Sprintf("%s for SLA on the ticket: %d", slaLabel, ticket.ID)
 	default:
-		alertHeader = "*Ticket Alert*"
+		alertHeader = ":ticket: *Ticket Alert*"
 		alertDescription = fmt.Sprintf("Action required for ticket: *%s*", ticket.Subject)
+	}
+
+	// Map SLA alert levels to color bar images (you need to host these images)
+	var slaColorBarURLs = map[string]string{
+		"#3498DB": "https://singlecolorimage.com/get/3498DB/600x5", // Blue (3 hours remaining)
+		"#F1C40F": "https://singlecolorimage.com/get/F1C40F/600x5", // Yellow (2 hours remaining)
+		"#FFA500": "https://singlecolorimage.com/get/FFA500/600x5", // Orange (1 hour remaining)
+		"#FF8C00": "https://singlecolorimage.com/get/FF8C00/600x5", // Darker Orange (30 minutes remaining)
+		"#FF0000": "https://singlecolorimage.com/get/FF0000/600x5", // Red (15 minutes remaining / breached)
 	}
 
 	// Construct the message blocks using Slack Block Kit
 	blocks := []slack.Block{
 		slack.NewSectionBlock(slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("%s\n%s", alertHeader, alertDescription), false, false), nil, nil),
-		slack.NewSectionBlock(nil, []*slack.TextBlockObject{
-			slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Ticket ID:*\n<%s|#%d>", ticketURL, ticket.ID), false, false),
-			slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Subject:*\n%s", ticket.Subject), false, false),
-			slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Requester:*\n%s", requesterName), false, false),
-			slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Organization:*\n%s", organizationName), false, false),
-			slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Tag:*\n%s", alertTag), false, false),
-			slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*SLA Expiration:*\n%s", slaExpiration), false, false),
-		}, nil),
-		slack.NewActionBlock("", slack.NewButtonBlockElement("acknowledge", fmt.Sprintf("acknowledge_%d", ticket.ID), slack.NewTextBlockObject("plain_text", "Acknowledge", false, false)).WithStyle(slack.StylePrimary)),
 	}
+
+	// If SLA alert, insert the color bar image as the second block
+	if alertType == "sla_deadline" {
+		if imgURL, exists := slaColorBarURLs[color]; exists {
+			imageBlock := slack.NewImageBlock(imgURL, "SLA urgency level", "", nil)
+			blocks = append(blocks, imageBlock) // Insert color strip after the first block
+		}
+	}
+
+	// Continue constructing blocks
+	blocks = append(blocks, slack.NewSectionBlock(nil, []*slack.TextBlockObject{
+		slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Ticket ID:*\n<%s|#%d>", ticketURL, ticket.ID), false, false),
+		slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Subject:*\n%s", ticket.Subject), false, false),
+		slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Requester:*\n%s", requesterName), false, false),
+		slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Organization:*\n%s", organizationName), false, false),
+		slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Tag:*\n%s", alertTag), false, false),
+		slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*SLA Expiration:*\n%s", slaExpiration), false, false),
+	}, nil))
+
+	// Add the acknowledgment button at the end
+	blocks = append(blocks, slack.NewActionBlock("", slack.NewButtonBlockElement("acknowledge", fmt.Sprintf("acknowledge_%d", ticket.ID), slack.NewTextBlockObject("plain_text", "Acknowledge", false, false)).WithStyle(slack.StylePrimary)))
 
 	// Create and send the message using the Slack client
 	channelID, timestamp, err := s.client.PostMessage(channelID, slack.MsgOptionBlocks(blocks...))

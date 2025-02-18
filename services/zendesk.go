@@ -64,6 +64,8 @@ type Organization struct {
 	Name string `json:"name"`
 }
 
+var lastPollTime = time.Now().Add(-5 * time.Minute) // Start 5 minutes before now
+
 // NewZendeskClient initializes a new ZendeskClient using configuration from the database.
 func NewZendeskClient(db db.Database) (*ZendeskClient, error) {
 	subdomain, err := models.GetConfiguration(db, "zendesk_subdomain")
@@ -97,7 +99,7 @@ func NewZendeskClient(db db.Database) (*ZendeskClient, error) {
 
 // StartZendeskPolling handles periodic polling of tickets from Zendesk.
 func StartZendeskPolling(ctx context.Context, db db.Database, sseServer *middlewares.SSEServer, slackService *SlackService) {
-	var lastPollTime = time.Now().Add(-5 * time.Minute) // Start 5 minutes before now
+
 	broadcastStatusUpdates(sseServer, "zendesk", "connected", "")
 
 	for {
@@ -133,7 +135,7 @@ func StartZendeskPolling(ctx context.Context, db db.Database, sseServer *middlew
 		if len(allTickets) == 0 {
 			log.Println("No tickets to process")
 		} else {
-			processTickets(ctx, db, allTickets, slaData, sseServer, slackService)
+			processTickets(ctx, db, allTickets, slaData, sseServer, slackService, zendeskClient)
 		}
 
 		lastPollTime = time.Now()
@@ -141,7 +143,7 @@ func StartZendeskPolling(ctx context.Context, db db.Database, sseServer *middlew
 	}
 }
 
-func processTickets(ctx context.Context, db db.Database, tickets []zendesk.Ticket, slaData map[int64]SLAInfo, sseServer *middlewares.SSEServer, slackService *SlackService) {
+func processTickets(ctx context.Context, db db.Database, tickets []zendesk.Ticket, slaData map[int64]SLAInfo, sseServer *middlewares.SSEServer, slackService *SlackService, zc *ZendeskClient) {
 
 	userAlerts, err := models.GetAllTagAlerts(db)
 	log.Printf("Processing %d tickets...\n", len(tickets))
@@ -163,7 +165,18 @@ func processTickets(ctx context.Context, db db.Database, tickets []zendesk.Ticke
 				case AlertTypeNewTicket:
 					sendAlert = isNewTicket(ticket)
 				case AlertTypeTicketUpdate:
-					sendAlert = isUpdatedTicket(ticket)
+					if isUpdatedTicket(ticket) {
+						lastPublicCommentTime, err := zc.GetLastPublicCommentTime(ticket.ID)
+						if err != nil {
+							log.Printf("Skipping ticket %d: %v", ticket.ID, err)
+							continue
+						}
+
+						if lastPublicCommentTime.After(lastPollTime) {
+							sendAlert = true
+						}
+					}
+
 				case AlertTypeSLABreach:
 
 					if slaInfo, ok := slaData[ticket.ID]; ok {
@@ -333,6 +346,44 @@ func (zc *ZendeskClient) GetOrganizationByID(organizationID int64) (*Organizatio
 	}
 
 	return &result.Organization, nil
+}
+
+// GetLastPublicCommentTime retrieves the timestamp of the last public comment on a ticket.
+// GetLastPublicCommentTime retrieves the timestamp of the last public comment on a ticket.
+func (zc *ZendeskClient) GetLastPublicCommentTime(ticketID int64) (time.Time, error) {
+	var lastPublicCommentTime time.Time
+	ops := zendesk.NewPaginationOptions()
+	ops.PageSize = 10
+	ops.Id = ticketID
+	it := zc.client.GetTicketCommentsIterator(context.Background(), ops)
+
+	for it.HasMore() {
+		comments, err := it.GetNext()
+		if err != nil {
+			return time.Time{}, fmt.Errorf("failed to retrieve comments for ticket %d: %v", ticketID, err)
+		}
+
+		// Ensure we have comments before accessing the last element
+		if len(comments) == 0 {
+			continue
+		}
+
+		lastComment := comments[len(comments)-1] // Get the last comment
+
+		// Check if the comment is public by safely dereferencing the *bool
+		if lastComment.Public != nil && *lastComment.Public {
+			commentTime := lastComment.CreatedAt
+			if commentTime.After(lastPublicCommentTime) {
+				lastPublicCommentTime = commentTime
+			}
+		}
+	}
+
+	if lastPublicCommentTime.IsZero() {
+		return time.Time{}, fmt.Errorf("no public comments found for ticket %d", ticketID)
+	}
+
+	return lastPublicCommentTime, nil
 }
 
 func getSLALabel(ticket zendesk.Ticket, slaData map[int64]SLAInfo) string {

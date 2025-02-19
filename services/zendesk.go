@@ -178,25 +178,32 @@ func processTickets(ctx context.Context, db db.Database, tickets []zendesk.Ticke
 					}
 
 				case AlertTypeSLABreach:
-
 					if slaInfo, ok := slaData[ticket.ID]; ok {
 						if label, color, matches := slaConditionMatches(slaInfo.PolicyMetrics); matches {
 							msgColor = color
-							// Correct the argument types and pass *sql.DB
+
+							// Retrieve existing alert from cache
 							existingAlert, err := models.GetSLAAlertCache(ctx, db, int(alert.User.ID), int(ticket.ID), alert.AlertType)
-							if err == nil && existingAlert.BreachAt != slaInfo.PolicyMetrics[0].BreachAt && existingAlert.Label != label {
-								models.ClearSLAAlertCache(ctx, db, existingAlert.ID)
-							} else if err == nil {
-								continue
+
+							// If an alert exists, check if the label is different
+							if err == nil {
+								if existingAlert.Label != label {
+									// The label has changed (e.g., from "Less than 3 hours" to "Less than 2 hours"),
+									// so clear the existing alert and allow a new alert to be sent
+									models.ClearSLAAlertCache(ctx, db, existingAlert.ID)
+								} else {
+									// If the label hasn't changed, skip the alert to avoid duplicates
+									continue
+								}
 							}
 
+							// Send the new alert and cache it
 							sendAlert = true
 							slaLabel = label
 
-							// Log the SLA alert
 							logEntry := models.SLAAlertCache{
-								UserID:    int64(alert.User.ID), // Use int type
-								TicketID:  int64(ticket.ID),     // Use int type
+								UserID:    int64(alert.User.ID), // Use int64
+								TicketID:  int64(ticket.ID),     // Use int64
 								AlertType: alert.AlertType,
 								BreachAt:  slaInfo.PolicyMetrics[0].BreachAt,
 								Label:     slaLabel,

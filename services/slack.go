@@ -238,13 +238,13 @@ func (s *SlackService) SendSlackMessage(channelID, alertType, slaLabel string, t
 	switch alertType {
 	case "new_ticket":
 		alertHeader = ":new: *New Ticket Alert*"
-		alertDescription = fmt.Sprintf("A new ticket has been created: *%s*", ticket.Subject)
+		alertDescription = fmt.Sprintf("*<%s|%s>* (#%d) was opened by %s from *%s*.", ticketURL, ticket.Subject, ticket.ID, requesterName, organizationName)
 	case "ticket_update":
 		alertHeader = ":memo: *Ticket Update Alert*"
-		alertDescription = fmt.Sprintf("An update has been made to the ticket: *%s*", ticket.Subject)
+		alertDescription = fmt.Sprintf("*<%s|%s>* (#%d) was updated by %s from *%s*.", ticketURL, ticket.Subject, ticket.ID, requesterName, organizationName)
 	case "sla_deadline":
 		alertHeader = ":rotating_light: *SLA Breach Warning*"
-		alertDescription = fmt.Sprintf("%s for SLA on the ticket: %d", slaLabel, ticket.ID)
+		alertDescription = fmt.Sprintf("%s for SLA on *<%s|%s>* (#%d). \nExpires at %s", slaLabel, ticketURL, ticket.Subject, ticket.ID, slaExpiration)
 	default:
 		alertHeader = ":ticket: *Ticket Alert*"
 		alertDescription = fmt.Sprintf("Action required for ticket: *%s*", ticket.Subject)
@@ -271,16 +271,6 @@ func (s *SlackService) SendSlackMessage(channelID, alertType, slaLabel string, t
 			blocks = append(blocks, imageBlock) // Insert color strip after the first block
 		}
 	}
-
-	// Continue constructing blocks
-	blocks = append(blocks, slack.NewSectionBlock(nil, []*slack.TextBlockObject{
-		slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Ticket ID:*\n<%s|#%d>", ticketURL, ticket.ID), false, false),
-		slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Subject:*\n%s", ticket.Subject), false, false),
-		slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Requester:*\n%s", requesterName), false, false),
-		slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Organization:*\n%s", organizationName), false, false),
-		slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*Tag:*\n%s", alertTag), false, false),
-		slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("*SLA Expiration:*\n%s", slaExpiration), false, false),
-	}, nil))
 
 	// Add the acknowledgment button at the end
 	blocks = append(blocks, slack.NewActionBlock("", slack.NewButtonBlockElement("acknowledge", fmt.Sprintf("acknowledge_%d", ticket.ID), slack.NewTextBlockObject("plain_text", "Acknowledge", false, false)).WithStyle(slack.StylePrimary)))

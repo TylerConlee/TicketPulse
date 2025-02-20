@@ -56,6 +56,7 @@ type SatisfactionRating struct {
 type User struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
+	Role string `json:"role"`
 }
 
 // Organization represents a Zendesk organization.
@@ -147,8 +148,12 @@ func processTickets(ctx context.Context, db db.Database, tickets []zendesk.Ticke
 
 	userAlerts, err := models.GetAllTagAlerts(db)
 	log.Printf("Processing %d tickets...\n", len(tickets))
-	for _, ticket := range tickets {
+	processedTickets := make(map[int64]bool)
 
+	for _, ticket := range tickets {
+		if processedTickets[ticket.ID] {
+			continue
+		}
 		if err != nil {
 			fmt.Println("Error fetching user alerts:", err)
 			continue
@@ -166,13 +171,14 @@ func processTickets(ctx context.Context, db db.Database, tickets []zendesk.Ticke
 					sendAlert = isNewTicket(ticket)
 				case AlertTypeTicketUpdate:
 					if isUpdatedTicket(ticket) {
-						lastPublicCommentTime, err := zc.GetLastPublicCommentTime(ticket.ID)
+						lastPublicCommentTime, isEndUser, err := zc.GetLastPublicCommentTime(ticket.ID)
 						if err != nil {
 							log.Printf("Skipping ticket %d: %v", ticket.ID, err)
 							continue
 						}
 
-						if lastPublicCommentTime.After(lastPollTime) {
+						// Only send alert if the last comment was after lastPollTime AND made by an end user
+						if lastPublicCommentTime.After(lastPollTime) && isEndUser {
 							sendAlert = true
 						}
 					}
@@ -234,6 +240,8 @@ func processTickets(ctx context.Context, db db.Database, tickets []zendesk.Ticke
 				}
 			}
 		}
+		processedTickets[ticket.ID] = true
+
 	}
 	middlewares.AddGlobalNotification(sseServer, "Ticket processing complete", fmt.Sprintf("Processed %v tickets...", len(tickets)), "success")
 }
@@ -355,10 +363,12 @@ func (zc *ZendeskClient) GetOrganizationByID(organizationID int64) (*Organizatio
 	return &result.Organization, nil
 }
 
-// GetLastPublicCommentTime retrieves the timestamp of the last public comment on a ticket.
-// GetLastPublicCommentTime retrieves the timestamp of the last public comment on a ticket.
-func (zc *ZendeskClient) GetLastPublicCommentTime(ticketID int64) (time.Time, error) {
+// GetLastPublicCommentTime retrieves the timestamp of the last public comment on a ticket
+// and determines if the comment was made by an end user.
+func (zc *ZendeskClient) GetLastPublicCommentTime(ticketID int64) (time.Time, bool, error) {
 	var lastPublicCommentTime time.Time
+	var isEndUser bool // Tracks if the last comment was from an end user
+
 	ops := zendesk.NewPaginationOptions()
 	ops.PageSize = 10
 	ops.Id = ticketID
@@ -367,7 +377,7 @@ func (zc *ZendeskClient) GetLastPublicCommentTime(ticketID int64) (time.Time, er
 	for it.HasMore() {
 		comments, err := it.GetNext()
 		if err != nil {
-			return time.Time{}, fmt.Errorf("failed to retrieve comments for ticket %d: %v", ticketID, err)
+			return time.Time{}, false, fmt.Errorf("failed to retrieve comments for ticket %d: %v", ticketID, err)
 		}
 
 		// Ensure we have comments before accessing the last element
@@ -382,15 +392,25 @@ func (zc *ZendeskClient) GetLastPublicCommentTime(ticketID int64) (time.Time, er
 			commentTime := lastComment.CreatedAt
 			if commentTime.After(lastPublicCommentTime) {
 				lastPublicCommentTime = commentTime
+
+				// Determine if the commenter is an end user
+				requester, err := zc.GetRequesterByID(lastComment.AuthorID)
+				if err != nil {
+					return time.Time{}, false, fmt.Errorf("failed to retrieve author details for ticket %d: %v", ticketID, err)
+
+				}
+
+				isEndUser = (requester.Role == "end-user")
+
 			}
 		}
 	}
 
 	if lastPublicCommentTime.IsZero() {
-		return time.Time{}, fmt.Errorf("no public comments found for ticket %d", ticketID)
+		return time.Time{}, false, fmt.Errorf("no public comments found for ticket %d", ticketID)
 	}
 
-	return lastPublicCommentTime, nil
+	return lastPublicCommentTime, isEndUser, nil
 }
 
 func getSLALabel(ticket zendesk.Ticket, slaData map[int64]SLAInfo) string {

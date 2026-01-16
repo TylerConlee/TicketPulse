@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/TylerConlee/TicketPulse/db"
@@ -21,6 +22,7 @@ type SlackService struct {
 	ready      bool
 	sseServer  *middlewares.SSEServer
 	DB         db.Database
+	channels   []slack.Channel // Moved from global var allChannels
 }
 
 // SlackMessage represents a Slack Block Kit message payload.
@@ -51,8 +53,6 @@ type Action struct {
 	Value string `json:"value"`
 }
 
-var allChannels []slack.Channel
-
 func NewSlackService(db db.Database, sseServer *middlewares.SSEServer) (*SlackService, error) {
 	broadcastStatusUpdates(sseServer, "slack", "polling", "Connecting to Slack...")
 	botToken, err := models.GetConfiguration(db, "slack_bot_token")
@@ -81,6 +81,7 @@ func NewSlackService(db db.Database, sseServer *middlewares.SSEServer) (*SlackSe
 		Limit:           100,
 	}
 
+	var allChannels []slack.Channel
 	for {
 		channels, nextCursor, err := client.GetConversations(params)
 		if err != nil {
@@ -102,6 +103,7 @@ func NewSlackService(db db.Database, sseServer *middlewares.SSEServer) (*SlackSe
 		ready:      true,
 		sseServer:  sseServer,
 		DB:         db,
+		channels:   allChannels,
 	}, nil
 }
 
@@ -111,8 +113,7 @@ func (s *SlackService) IsReady() bool {
 }
 
 func (s *SlackService) GetConversations() ([]slack.Channel, error) {
-
-	return allChannels, nil
+	return s.channels, nil
 }
 
 func (s *SlackService) SendAlert(channelID, message string) error {
@@ -233,30 +234,57 @@ func (s *SlackService) SendSlackMessage(channelID, alertType, slaLabel string, t
 		slaExpiration = slaInfo.PolicyMetrics[0].BreachAt.Format("2006-01-02 15:04")
 	}
 
+	// Map ticket priority levels to image URLs for color representation
+	var priorityColorImages = map[string]string{
+		"low":    "https://singlecolorimage.com/get/3498DB/16x16", // Blue
+		"normal": "https://singlecolorimage.com/get/F1C40F/16x16", // Yellow
+		"high":   "https://singlecolorimage.com/get/FFA500/16x16", // Orange
+		"urgent": "https://singlecolorimage.com/get/FF0000/16x16", // Red
+	}
+
+	// Map SLA alert levels to image URLs for color representation
+	var slaColorImages = map[string]string{
+		"#3498DB": "https://singlecolorimage.com/get/3498DB/16x16", // Blue (3 hours remaining)
+		"#F1C40F": "https://singlecolorimage.com/get/F1C40F/16x16", // Yellow (2 hours remaining)
+		"#FFA500": "https://singlecolorimage.com/get/FFA500/16x16", // Orange (1 hour remaining)
+		"#FF8C00": "https://singlecolorimage.com/get/FF8C00/16x16", // Darker Orange (30 minutes remaining)
+		"#FF0000": "https://singlecolorimage.com/get/FF0000/16x16", // Red (15 minutes remaining / breached)
+	}
+
 	// Determine the message content based on the alert type
 	var alertHeader, alertDescription string
 	switch alertType {
 	case "new_ticket":
-		alertHeader = ":new: *New Ticket Alert*"
+		alertHeader = ":admission_tickets: *New Ticket Alert*"
 		alertDescription = fmt.Sprintf("*<%s|%s>* (#%d) was opened by %s from *%s*.", ticketURL, ticket.Subject, ticket.ID, requesterName, organizationName)
 	case "ticket_update":
 		alertHeader = ":memo: *Ticket Update Alert*"
 		alertDescription = fmt.Sprintf("*<%s|%s>* (#%d) was updated by %s from *%s*.", ticketURL, ticket.Subject, ticket.ID, requesterName, organizationName)
 	case "sla_deadline":
+		// Generic SLA deadline - shouldn't typically be used now
 		alertHeader = ":rotating_light: *SLA Breach Warning*"
-		alertDescription = fmt.Sprintf("%s for SLA on *<%s|%s>* (#%d). \nExpires at %s", slaLabel, ticketURL, ticket.Subject, ticket.ID, slaExpiration)
+		alertDescription = fmt.Sprintf("%s for SLA on *<%s|%s>* (#%d). ", slaLabel, ticketURL, ticket.Subject, ticket.ID)
+	case "sla_reply":
+		// Reply SLA - check if breached or warning
+		if strings.Contains(slaLabel, "BREACHED") {
+			alertHeader = ":rotating_light: *Reply SLA BREACHED*"
+			alertDescription = fmt.Sprintf("*Reply SLA has been breached* on *<%s|%s>* (#%d). Immediate response required!", ticketURL, ticket.Subject, ticket.ID)
+		} else {
+			alertHeader = ":warning: *Reply SLA Warning*"
+			alertDescription = fmt.Sprintf("*%s* for Reply SLA on *<%s|%s>* (#%d). ", slaLabel, ticketURL, ticket.Subject, ticket.ID)
+		}
+	case "sla_resolution":
+		// Resolution SLA - check if breached or warning
+		if strings.Contains(slaLabel, "BREACHED") {
+			alertHeader = ":rotating_light: *Resolution SLA BREACHED*"
+			alertDescription = fmt.Sprintf("*Resolution SLA has been breached* on *<%s|%s>* (#%d). Immediate action required!", ticketURL, ticket.Subject, ticket.ID)
+		} else {
+			alertHeader = ":warning: *Resolution SLA Warning*"
+			alertDescription = fmt.Sprintf("*%s* for Resolution SLA on *<%s|%s>* (#%d). ", slaLabel, ticketURL, ticket.Subject, ticket.ID)
+		}
 	default:
 		alertHeader = ":ticket: *Ticket Alert*"
 		alertDescription = fmt.Sprintf("Action required for ticket: *%s*", ticket.Subject)
-	}
-
-	// Map SLA alert levels to color bar images (you need to host these images)
-	var slaColorBarURLs = map[string]string{
-		"#3498DB": "https://singlecolorimage.com/get/3498DB/600x5", // Blue (3 hours remaining)
-		"#F1C40F": "https://singlecolorimage.com/get/F1C40F/600x5", // Yellow (2 hours remaining)
-		"#FFA500": "https://singlecolorimage.com/get/FFA500/600x5", // Orange (1 hour remaining)
-		"#FF8C00": "https://singlecolorimage.com/get/FF8C00/600x5", // Darker Orange (30 minutes remaining)
-		"#FF0000": "https://singlecolorimage.com/get/FF0000/600x5", // Red (15 minutes remaining / breached)
 	}
 
 	// Construct the message blocks using Slack Block Kit
@@ -264,13 +292,36 @@ func (s *SlackService) SendSlackMessage(channelID, alertType, slaLabel string, t
 		slack.NewSectionBlock(slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("%s\n%s", alertHeader, alertDescription), false, false), nil, nil),
 	}
 
-	// If SLA alert, insert the color bar image as the second block
-	if alertType == "sla_deadline" {
-		if imgURL, exists := slaColorBarURLs[color]; exists {
-			imageBlock := slack.NewImageBlock(imgURL, "SLA urgency level", "", nil)
-			blocks = append(blocks, imageBlock) // Insert color strip after the first block
-		}
+	// Create a context block with priority and SLA expiration details
+	contextElements := []slack.MixedElement{}
+
+	priorityImageURL := priorityColorImages[strings.ToLower(ticket.Priority)]
+	slaImageURL, slaImageExists := slaColorImages[color]
+
+	// Add priority image if available
+	if priorityImageURL != "" {
+		contextElements = append(contextElements, slack.NewImageBlockElement(priorityImageURL, "Priority Level"))
 	}
+
+	// Add SLA image if applicable
+	isSLAAlert := alertType == "sla_deadline" || alertType == "sla_reply" || alertType == "sla_resolution"
+	if isSLAAlert && slaImageExists {
+		contextElements = append(contextElements, slack.NewImageBlockElement(slaImageURL, "SLA Urgency Level"))
+	}
+
+	// Add text for priority and SLA expiration
+	var contextText string
+	if isSLAAlert && strings.Contains(slaLabel, "BREACHED") {
+		contextText = fmt.Sprintf("*Ticket Priority:* %s | *SLA Breached at:* %s", ticket.Priority, slaExpiration)
+	} else if isSLAAlert {
+		contextText = fmt.Sprintf("*Ticket Priority:* %s | *SLA Expires at:* %s", ticket.Priority, slaExpiration)
+	} else {
+		contextText = fmt.Sprintf("*Ticket Priority:* %s", ticket.Priority)
+	}
+	contextElements = append(contextElements, slack.NewTextBlockObject("mrkdwn", contextText, false, false))
+
+	// Add the context block
+	blocks = append(blocks, slack.NewContextBlock("", contextElements...))
 
 	// Add the acknowledgment button at the end
 	blocks = append(blocks, slack.NewActionBlock("", slack.NewButtonBlockElement("acknowledge", fmt.Sprintf("acknowledge_%d", ticket.ID), slack.NewTextBlockObject("plain_text", "Acknowledge", false, false)).WithStyle(slack.StylePrimary)))
@@ -343,7 +394,7 @@ func sendSlackDM(slackService *SlackService, slackUserID string, unreadTickets [
 	if len(openTicketsWithSLA) > 0 {
 		blocks = append(blocks, slack.NewSectionBlock(slack.NewTextBlockObject("mrkdwn", "*Open Tickets with Active SLAs*:", false, false), nil, nil))
 		for _, ticket := range openTicketsWithSLA {
-			slaLabel := getSLALabel(ticket, slaData)
+			slaLabel := GetSLALabel(ticket, slaData)
 			ticketInfo := fmt.Sprintf("• *%s* (ID: %d) - SLA: %s\n", ticket.Subject, ticket.ID, slaLabel)
 			blocks = append(blocks, slack.NewSectionBlock(slack.NewTextBlockObject("mrkdwn", ticketInfo, false, false), nil, nil))
 		}

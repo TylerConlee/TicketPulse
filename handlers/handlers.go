@@ -1,5 +1,3 @@
-//go:build !test
-
 package handlers
 
 import (
@@ -10,17 +8,30 @@ import (
 	"github.com/TylerConlee/TicketPulse/db"
 	"github.com/TylerConlee/TicketPulse/middlewares"
 	"github.com/TylerConlee/TicketPulse/models"
+	"github.com/TylerConlee/TicketPulse/services"
 	"github.com/gorilla/mux"
 )
 
-// AppHandler struct will hold the database instance
+// AppHandler struct will hold the database and service instances
 type AppHandler struct {
-	DB db.Database
+	DB           db.Database
+	SlackService services.SlackServiceInterface
+	Zendesk      services.ZendeskClientInterface
 }
 
 // NewAppHandler initializes the AppHandler with a database
 func NewAppHandler(db db.Database) *AppHandler {
 	return &AppHandler{DB: db}
+}
+
+// NewAppHandlerWithServices initializes the AppHandler with database and service interfaces.
+// This is useful for testing with mock services.
+func NewAppHandlerWithServices(db db.Database, slack services.SlackServiceInterface, zendesk services.ZendeskClientInterface) *AppHandler {
+	return &AppHandler{
+		DB:           db,
+		SlackService: slack,
+		Zendesk:      zendesk,
+	}
 }
 
 // HomeHandler displays the home page with a list of users.

@@ -108,6 +108,12 @@ func (s *SQLDatabase) initTables() error {
             selected_tags TEXT,
             summary_time DATETIME,
             slack_user_id TEXT,
+            work_day_start_time TIME,
+            work_day_end_time TIME,
+            timezone TEXT,
+            work_days TEXT,
+            summary_tag_filter TEXT,
+            summary_ticket_filter TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );`,
@@ -134,13 +140,23 @@ func (s *SQLDatabase) initTables() error {
 			FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 		);`,
 		`CREATE TABLE IF NOT EXISTS sla_alert_cache (
-			id INTEGER PRIMARY KEY AUTOINCREMENT, -- Use INTEGER for AUTOINCREMENT
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			user_id INT NOT NULL,
 			ticket_id INT NOT NULL,
 			alert_type VARCHAR(255) NOT NULL,
+			metric_type VARCHAR(255),
 			breach_at TIMESTAMP NOT NULL,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, 
-			UNIQUE(user_id, ticket_id, alert_type),
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			label TEXT,
+			UNIQUE(user_id, ticket_id, alert_type, metric_type),
+			FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+		);`,
+		`CREATE TABLE IF NOT EXISTS daily_summary_log (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			summary_date DATE NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(user_id, summary_date),
 			FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 		);`,
 	}
@@ -148,6 +164,60 @@ func (s *SQLDatabase) initTables() error {
 	for _, stmt := range tablesSQL {
 		if _, err := s.Exec(stmt); err != nil {
 			return err // Return the error to be handled by the caller
+		}
+	}
+
+	// Run migrations for existing databases
+	if err := s.runMigrations(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// runMigrations handles schema updates for existing databases
+func (s *SQLDatabase) runMigrations() error {
+	// Check if metric_type column exists in sla_alert_cache
+	var count int
+	err := s.DB.Get(&count, `SELECT COUNT(*) FROM pragma_table_info('sla_alert_cache') WHERE name='metric_type'`)
+	if err != nil || count == 0 {
+		// Add metric_type column if it doesn't exist
+		_, err = s.Exec(`ALTER TABLE sla_alert_cache ADD COLUMN metric_type VARCHAR(255)`)
+		if err != nil {
+			log.Printf("Warning: Could not add metric_type column (may already exist): %v", err)
+		}
+		// Update unique constraint to include metric_type
+		// SQLite doesn't support DROP CONSTRAINT, so we'll recreate the table
+		// For now, we'll handle this in application logic
+	}
+
+	// Check if label column exists in sla_alert_cache
+	err = s.DB.Get(&count, `SELECT COUNT(*) FROM pragma_table_info('sla_alert_cache') WHERE name='label'`)
+	if err != nil || count == 0 {
+		_, err = s.Exec(`ALTER TABLE sla_alert_cache ADD COLUMN label TEXT`)
+		if err != nil {
+			log.Printf("Warning: Could not add label column (may already exist): %v", err)
+		}
+	}
+
+	// Check if work day columns exist in users table
+	columns := []string{"work_day_start_time", "work_day_end_time", "timezone", "work_days", "summary_tag_filter", "summary_ticket_filter"}
+	for _, col := range columns {
+		err = s.DB.Get(&count, `SELECT COUNT(*) FROM pragma_table_info('users') WHERE name=?`, col)
+		if err != nil || count == 0 {
+			var alterStmt string
+			switch col {
+			case "work_day_start_time", "work_day_end_time":
+				alterStmt = `ALTER TABLE users ADD COLUMN ` + col + ` TIME`
+			case "timezone":
+				alterStmt = `ALTER TABLE users ADD COLUMN ` + col + ` TEXT`
+			case "work_days", "summary_tag_filter", "summary_ticket_filter":
+				alterStmt = `ALTER TABLE users ADD COLUMN ` + col + ` TEXT`
+			}
+			_, err = s.Exec(alterStmt)
+			if err != nil {
+				log.Printf("Warning: Could not add %s column (may already exist): %v", col, err)
+			}
 		}
 	}
 

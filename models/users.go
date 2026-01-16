@@ -3,6 +3,7 @@ package models
 import (
 	"database/sql"
 	"encoding/gob"
+	"fmt"
 	"log"
 	"time"
 
@@ -22,16 +23,22 @@ const (
 )
 
 type User struct {
-	ID           int
-	Email        string
-	Name         string
-	Role         Role
-	DailySummary bool
-	SelectedTags []TagAlert     // New field for storing tag-specific alerts
-	SummaryTime  sql.NullTime   // The preferred time for the daily summary
-	SlackUserID  sql.NullString // The user's Slack ID for direct messages
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID                  int
+	Email               string
+	Name                string
+	Role                Role
+	DailySummary        bool
+	SelectedTags        []TagAlert     // New field for storing tag-specific alerts
+	SummaryTime         sql.NullTime   // The preferred time for the daily summary
+	SlackUserID         sql.NullString // The user's Slack ID for direct messages
+	WorkDayStartTime    sql.NullTime   // Start time of work day
+	WorkDayEndTime      sql.NullTime   // End time of work day
+	Timezone            sql.NullString // User's timezone (e.g., "America/New_York")
+	WorkDays            string         // JSON array of work days (e.g., ["Monday", "Tuesday", ...])
+	SummaryTagFilter    string         // "all_tags" or "configured_tags"
+	SummaryTicketFilter string         // "all_tickets" or "assigned_tickets"
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type TagAlert struct {
@@ -88,10 +95,13 @@ func GetUserByEmail(db db.Database, email string) (User, error) {
 
 // GetUserByID retrieves a user by their ID
 func GetUserByID(db db.Database, id int) (User, error) {
-	row := db.QueryRow(`SELECT id, email, name, role, daily_summary, summary_time, slack_user_id FROM users WHERE id = ?`, id)
+	row := db.QueryRow(`SELECT id, email, name, role, daily_summary, summary_time, slack_user_id, work_day_start_time, work_day_end_time, timezone, work_days, summary_tag_filter, summary_ticket_filter FROM users WHERE id = ?`, id)
 	var user User
+	var workDayStartTimeStr, workDayEndTimeStr sql.NullString
+	var timezone sql.NullString
+	var workDays, summaryTagFilter, summaryTicketFilter sql.NullString
 
-	err := row.Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.DailySummary, &user.SummaryTime, &user.SlackUserID)
+	err := row.Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.DailySummary, &user.SummaryTime, &user.SlackUserID, &workDayStartTimeStr, &workDayEndTimeStr, &timezone, &workDays, &summaryTagFilter, &summaryTicketFilter)
 	if err != nil {
 		return user, err
 	}
@@ -108,6 +118,32 @@ func GetUserByID(db db.Database, id int) (User, error) {
 		summaryTime = user.SummaryTime.Time
 	}
 	user.SummaryTime = sql.NullTime{Time: summaryTime, Valid: user.SummaryTime.Valid}
+
+	// Handle work day fields - parse time strings
+	if workDayStartTimeStr.Valid && workDayStartTimeStr.String != "" {
+		if t, err := time.Parse("15:04:05", workDayStartTimeStr.String); err == nil {
+			user.WorkDayStartTime = sql.NullTime{Time: t, Valid: true}
+		} else if t, err := time.Parse("15:04", workDayStartTimeStr.String); err == nil {
+			user.WorkDayStartTime = sql.NullTime{Time: t, Valid: true}
+		}
+	}
+	if workDayEndTimeStr.Valid && workDayEndTimeStr.String != "" {
+		if t, err := time.Parse("15:04:05", workDayEndTimeStr.String); err == nil {
+			user.WorkDayEndTime = sql.NullTime{Time: t, Valid: true}
+		} else if t, err := time.Parse("15:04", workDayEndTimeStr.String); err == nil {
+			user.WorkDayEndTime = sql.NullTime{Time: t, Valid: true}
+		}
+	}
+	user.Timezone = timezone
+	if workDays.Valid {
+		user.WorkDays = workDays.String
+	}
+	if summaryTagFilter.Valid {
+		user.SummaryTagFilter = summaryTagFilter.String
+	}
+	if summaryTicketFilter.Valid {
+		user.SummaryTicketFilter = summaryTicketFilter.String
+	}
 
 	return user, err
 }
@@ -236,8 +272,8 @@ func (u *User) UpdateDailySummarySettings(db db.Database, dailySummary bool, sum
 }
 
 // GetUsersWithDailySummaryEnabled returns a list of users who have enabled the daily summary.
-func GetUsersWithDailySummaryEnabled(db *sql.DB) ([]User, error) {
-	rows, err := db.Query(`SELECT id, name, email, role, daily_summary, summary_time, slack_user_id FROM users WHERE daily_summary = 1`)
+func GetUsersWithDailySummaryEnabled(db db.Database) ([]User, error) {
+	rows, err := db.Query(`SELECT id, name, email, role, daily_summary, summary_time, slack_user_id, work_day_start_time, work_day_end_time, timezone, work_days, summary_tag_filter, summary_ticket_filter FROM users WHERE daily_summary = 1`)
 	if err != nil {
 		return nil, err
 	}
@@ -246,11 +282,68 @@ func GetUsersWithDailySummaryEnabled(db *sql.DB) ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var user User
-		err := rows.Scan(&user.ID, &user.Name, &user.Email, &user.Role, &user.DailySummary, &user.SummaryTime, &user.SlackUserID)
+		var workDayStartTimeStr, workDayEndTimeStr sql.NullString
+		var timezone sql.NullString
+		var workDays, summaryTagFilter, summaryTicketFilter sql.NullString
+
+		err := rows.Scan(&user.ID, &user.Name, &user.Email, &user.Role, &user.DailySummary, &user.SummaryTime, &user.SlackUserID, &workDayStartTimeStr, &workDayEndTimeStr, &timezone, &workDays, &summaryTagFilter, &summaryTicketFilter)
 		if err != nil {
 			return nil, err
 		}
+
+		// Parse work day time strings
+		if workDayStartTimeStr.Valid && workDayStartTimeStr.String != "" {
+			if t, err := time.Parse("15:04:05", workDayStartTimeStr.String); err == nil {
+				user.WorkDayStartTime = sql.NullTime{Time: t, Valid: true}
+			} else if t, err := time.Parse("15:04", workDayStartTimeStr.String); err == nil {
+				user.WorkDayStartTime = sql.NullTime{Time: t, Valid: true}
+			}
+		}
+		if workDayEndTimeStr.Valid && workDayEndTimeStr.String != "" {
+			if t, err := time.Parse("15:04:05", workDayEndTimeStr.String); err == nil {
+				user.WorkDayEndTime = sql.NullTime{Time: t, Valid: true}
+			} else if t, err := time.Parse("15:04", workDayEndTimeStr.String); err == nil {
+				user.WorkDayEndTime = sql.NullTime{Time: t, Valid: true}
+			}
+		}
+		user.Timezone = timezone
+		if workDays.Valid {
+			user.WorkDays = workDays.String
+		}
+		if summaryTagFilter.Valid {
+			user.SummaryTagFilter = summaryTagFilter.String
+		}
+		if summaryTicketFilter.Valid {
+			user.SummaryTicketFilter = summaryTicketFilter.String
+		}
+
 		users = append(users, user)
 	}
 	return users, nil
+}
+
+// UpdateWorkDaySettings updates the user's work day settings.
+func (u *User) UpdateWorkDaySettings(db db.Database, startTime, endTime time.Time, timezone string, workDays string) error {
+	_, err := db.Exec(`UPDATE users SET work_day_start_time = ?, work_day_end_time = ?, timezone = ?, work_days = ? WHERE id = ?`,
+		startTime.Format("15:04:05"), endTime.Format("15:04:05"), timezone, workDays, u.ID)
+	if err != nil {
+		return fmt.Errorf("failed to update work day settings: %w", err)
+	}
+	u.WorkDayStartTime = sql.NullTime{Time: startTime, Valid: true}
+	u.WorkDayEndTime = sql.NullTime{Time: endTime, Valid: true}
+	u.Timezone = sql.NullString{String: timezone, Valid: true}
+	u.WorkDays = workDays
+	return nil
+}
+
+// UpdateSummaryFilterSettings updates the user's summary filter settings.
+func (u *User) UpdateSummaryFilterSettings(db db.Database, tagFilter, ticketFilter string) error {
+	_, err := db.Exec(`UPDATE users SET summary_tag_filter = ?, summary_ticket_filter = ? WHERE id = ?`,
+		tagFilter, ticketFilter, u.ID)
+	if err != nil {
+		return fmt.Errorf("failed to update summary filter settings: %w", err)
+	}
+	u.SummaryTagFilter = tagFilter
+	u.SummaryTicketFilter = ticketFilter
+	return nil
 }

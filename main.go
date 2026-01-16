@@ -22,6 +22,7 @@ var sseServer = middlewares.NewSSEServer()
 type Services struct {
 	SlackService     *services.SlackService
 	DashboardService *services.DashboardService
+	SchedulerService *services.SchedulerService
 }
 
 var Service *Services
@@ -37,10 +38,19 @@ func main() {
 	startSlackPollingChan := make(chan struct{})
 
 	slackService, dashboardService := initializeServices(startZenPollingChan, startSlackPollingChan)
+	
+	// Initialize SchedulerService
+	schedulerService := services.NewSchedulerService(database, slackService)
+	
 	Service = &Services{
 		SlackService:     slackService,
 		DashboardService: dashboardService,
+		SchedulerService: schedulerService,
 	}
+	
+	// Start scheduler in background
+	ctx := context.Background()
+	go schedulerService.StartScheduler(ctx)
 
 	// Set up the router
 	r := setupRouter()
@@ -196,6 +206,12 @@ func setupProtectedRoutes(r *mux.Router) *mux.Router {
 		appHandler.ProfileHandler(w, r, Service.SlackService)
 	}).Methods("POST")
 	protected.HandleFunc("/profile/update-summary-settings", func(w http.ResponseWriter, r *http.Request) {
+		appHandler.ProfileHandler(w, r, Service.SlackService)
+	}).Methods("POST")
+	protected.HandleFunc("/profile/update-work-day-settings", func(w http.ResponseWriter, r *http.Request) {
+		appHandler.ProfileHandler(w, r, Service.SlackService)
+	}).Methods("POST")
+	protected.HandleFunc("/profile/update-summary-filters", func(w http.ResponseWriter, r *http.Request) {
 		appHandler.ProfileHandler(w, r, Service.SlackService)
 	}).Methods("POST")
 	protected.HandleFunc("/profile/update-profile", func(w http.ResponseWriter, r *http.Request) {

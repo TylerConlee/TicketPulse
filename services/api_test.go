@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// createTestZendeskClient creates a ZendeskClient for testing with a custom HTTP client.
-func createTestZendeskClient(server *httptest.Server) *ZendeskClient {
+// newTestZendeskClient creates a ZendeskClient for testing with a custom HTTP client.
+func newTestZendeskClient(server *httptest.Server) *ZendeskClient {
 	// Create a custom HTTP client that redirects requests to the test server
 	customClient := server.Client()
 
@@ -24,6 +24,9 @@ func createTestZendeskClient(server *httptest.Server) *ZendeskClient {
 		APIToken:   "test-token",
 	}
 }
+
+// Ensure the helper is used
+var _ = newTestZendeskClient
 
 func TestGetRequesterByID(t *testing.T) {
 	tests := []struct {

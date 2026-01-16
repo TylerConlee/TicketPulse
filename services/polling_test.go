@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -80,7 +81,7 @@ func TestPollingService_PollOnce_NoConfiguration(t *testing.T) {
 	// Don't set up Zendesk configuration - should result in error
 	ps := NewPollingService(database, nil, nil)
 
-	result := ps.PollOnce(nil)
+	result := ps.PollOnce(context.Background())
 
 	assert.Error(t, result.Error)
 	assert.Contains(t, result.Error.Error(), "failed to create Zendesk client")

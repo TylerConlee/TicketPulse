@@ -11,9 +11,8 @@ var Database db.Database
 
 func init() {
 	// Initialize your database connection here.
-	var database db.Database
 	// Assuming a function db.NewDatabase() initializes the database and returns an instance and an error
-	database = db.NewDatabase()
+	database := db.NewDatabase()
 
 	SetDatabase(database)
 }

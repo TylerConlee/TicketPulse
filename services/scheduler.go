@@ -12,9 +12,8 @@ import (
 
 // SchedulerService handles scheduled tasks like daily summaries
 type SchedulerService struct {
-	db            db.Database
-	slackService  *SlackService
-	zendeskClient *ZendeskClient
+	db           db.Database
+	slackService *SlackService
 }
 
 // NewSchedulerService creates a new scheduler service

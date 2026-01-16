@@ -38,16 +38,16 @@ func main() {
 	startSlackPollingChan := make(chan struct{})
 
 	slackService, dashboardService := initializeServices(startZenPollingChan, startSlackPollingChan)
-	
+
 	// Initialize SchedulerService
 	schedulerService := services.NewSchedulerService(database, slackService)
-	
+
 	Service = &Services{
 		SlackService:     slackService,
 		DashboardService: dashboardService,
 		SchedulerService: schedulerService,
 	}
-	
+
 	// Start scheduler in background
 	ctx := context.Background()
 	go schedulerService.StartScheduler(ctx)
@@ -148,12 +148,12 @@ func checkZendeskConfig() bool {
 func checkSlackConfig() error {
 	botToken, err := models.GetConfiguration(database, "slack_bot_token")
 	if err != nil || botToken == "" {
-		return fmt.Errorf("Slack bot token is missing")
+		return fmt.Errorf("slack bot token is missing")
 	}
 
 	appToken, err := models.GetConfiguration(database, "slack_app_token")
 	if err != nil || appToken == "" {
-		return fmt.Errorf("Slack app token is missing")
+		return fmt.Errorf("slack app token is missing")
 	}
 
 	return nil

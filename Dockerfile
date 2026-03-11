@@ -1,5 +1,5 @@
 # Build Stage
-FROM golang:1.23 AS builder
+FROM golang:1.25 AS builder
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ ENV CGO_ENABLED=0
 RUN go build -ldflags="-s -w" -o ticketpulse .
 
 # Final Stage
-FROM alpine:3.18
+FROM alpine:3.22
 
 RUN apk add --no-cache ca-certificates wget
 

@@ -1,9 +1,12 @@
 package services
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/TylerConlee/TicketPulse/db"
+	"github.com/TylerConlee/TicketPulse/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -13,6 +16,48 @@ func setupSchedulerTestDB(t *testing.T) *db.SQLDatabase {
 	require.NotNil(t, database, "Failed to initialize test database")
 	return database
 }
+
+// --- DashboardService Tests ---
+
+func TestNewDashboardService(t *testing.T) {
+	database := setupSchedulerTestDB(t)
+	defer database.Close()
+
+	service := NewDashboardService(database)
+	assert.NotNil(t, service)
+	assert.Equal(t, database, service.db)
+}
+
+func TestGetAlertStatsForUser_NoData(t *testing.T) {
+	database := setupSchedulerTestDB(t)
+	defer database.Close()
+
+	service := NewDashboardService(database)
+	stats, err := service.GetAlertStatsForUser(1)
+	assert.NoError(t, err)
+	assert.Empty(t, stats)
+}
+
+func TestGetAlertStatsForUser_WithData(t *testing.T) {
+	database := setupSchedulerTestDB(t)
+	defer database.Close()
+
+	models.CreateUser(database, "test@example.com", "Test", models.AdminRole, false)
+	user, _ := models.GetUserByEmail(database, "test@example.com")
+
+	ctx := context.Background()
+	ts := time.Now().Format("2006-01-02 15:04:05")
+	models.CreateAlertLog(ctx, database, models.AlertLog{UserID: int64(user.ID), TicketID: 100, Tag: "urgent", AlertType: "new_ticket", Timestamp: ts})
+	models.CreateAlertLog(ctx, database, models.AlertLog{UserID: int64(user.ID), TicketID: 101, Tag: "urgent", AlertType: "new_ticket", Timestamp: ts})
+	models.CreateAlertLog(ctx, database, models.AlertLog{UserID: int64(user.ID), TicketID: 102, Tag: "billing", AlertType: "sla_reply", Timestamp: ts})
+
+	service := NewDashboardService(database)
+	stats, err := service.GetAlertStatsForUser(user.ID)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, stats)
+}
+
+// --- SchedulerService Tests ---
 
 func TestNewSchedulerService(t *testing.T) {
 	database := setupSchedulerTestDB(t)

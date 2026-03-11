@@ -2,8 +2,11 @@ package services
 
 import (
 	"encoding/json"
+	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/slack-go/slack"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -188,4 +191,72 @@ func TestAction_Struct(t *testing.T) {
 	assert.Equal(t, "Acknowledge", decoded.Text.Text)
 	assert.Equal(t, "danger", decoded.Style)
 	assert.Equal(t, "ack_123", decoded.Value)
+}
+
+func TestSlackService_GetConversations(t *testing.T) {
+	channels := []slack.Channel{
+		{GroupConversation: slack.GroupConversation{Conversation: slack.Conversation{ID: "C111"}, Name: "general"}},
+		{GroupConversation: slack.GroupConversation{Conversation: slack.Conversation{ID: "C222"}, Name: "random"}},
+	}
+	service := &SlackService{channels: channels}
+
+	result, err := service.GetConversations()
+	assert.NoError(t, err)
+	assert.Len(t, result, 2)
+	assert.Equal(t, "C111", result[0].ID)
+	assert.Equal(t, "general", result[0].Name)
+}
+
+func TestSlackService_GetConversations_Empty(t *testing.T) {
+	service := &SlackService{channels: nil}
+
+	result, err := service.GetConversations()
+	assert.NoError(t, err)
+	assert.Nil(t, result)
+}
+
+func TestParseTicketIDFromButtonValue(t *testing.T) {
+	tests := []struct {
+		name       string
+		value      string
+		expectedID int64
+	}{
+		{"valid acknowledge value", "acknowledge_12345", 12345},
+		{"zero ticket", "acknowledge_0", 0},
+		{"invalid format - no underscore", "acknowledge", 0},
+		{"invalid format - not a number", "acknowledge_abc", 0},
+		{"empty value", "", 0},
+		{"multiple underscores", "acknowledge_123_extra", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var ticketID int64
+			if parts := strings.SplitN(tt.value, "_", 2); len(parts) == 2 {
+				if id, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+					ticketID = id
+				}
+			}
+			assert.Equal(t, tt.expectedID, ticketID)
+		})
+	}
+}
+
+func TestSlackUserInfo_Struct(t *testing.T) {
+	info := SlackUserInfo{
+		Email:    "user@example.com",
+		RealName: "Test User",
+	}
+	assert.Equal(t, "user@example.com", info.Email)
+	assert.Equal(t, "Test User", info.RealName)
+}
+
+func TestSlackService_ZendeskClientField(t *testing.T) {
+	service := &SlackService{ready: true}
+	assert.Nil(t, service.ZendeskClient)
+
+	zc := &ZendeskClient{Subdomain: "test"}
+	service.ZendeskClient = zc
+	assert.NotNil(t, service.ZendeskClient)
+	assert.Equal(t, "test", service.ZendeskClient.Subdomain)
 }

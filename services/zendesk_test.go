@@ -1,6 +1,9 @@
 package services
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -366,4 +369,131 @@ func TestMetricTypeConstants(t *testing.T) {
 	// Verify metric type constants are defined correctly
 	assert.Equal(t, "reply_time", MetricTypeReply)
 	assert.Equal(t, "resolution_time", MetricTypeResolution)
+}
+
+func TestGetSLALabel_WithSLAData(t *testing.T) {
+	slaData := map[int64]SLAInfo{
+		100: {PolicyMetrics: []SLAPolicyMetric{
+			{Metric: "reply_time", Hours: 2, Minutes: 30},
+		}},
+	}
+	ticket := zendesk.Ticket{}
+	ticket.ID = 100
+
+	label := GetSLALabel(ticket, slaData)
+	assert.Equal(t, "reply_time - 2 hours 30 minutes remaining", label)
+}
+
+func TestGetSLALabel_NoSLAData(t *testing.T) {
+	slaData := map[int64]SLAInfo{}
+	ticket := zendesk.Ticket{}
+	ticket.ID = 999
+
+	label := GetSLALabel(ticket, slaData)
+	assert.Equal(t, "No SLA", label)
+}
+
+func TestGetSLALabel_EmptyMetrics(t *testing.T) {
+	slaData := map[int64]SLAInfo{
+		100: {PolicyMetrics: []SLAPolicyMetric{}},
+	}
+	ticket := zendesk.Ticket{}
+	ticket.ID = 100
+
+	label := GetSLALabel(ticket, slaData)
+	assert.Equal(t, "No SLA", label)
+}
+
+func TestAssignTicket_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Contains(t, r.URL.Path, "/tickets/100.json")
+
+		var body struct {
+			Ticket zendesk.Ticket `json:"ticket"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		assert.Equal(t, int64(42), body.Ticket.AssigneeID)
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ticket": map[string]interface{}{
+				"id":          100,
+				"assignee_id": 42,
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := createTestZendeskClientWithLibrary(server)
+	err := client.AssignTicket(100, 42)
+	assert.NoError(t, err)
+}
+
+func TestAssignTicket_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := createTestZendeskClientWithLibrary(server)
+	err := client.AssignTicket(100, 42)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to assign ticket")
+}
+
+func TestAddInternalNote_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Contains(t, r.URL.Path, "/tickets/200.json")
+
+		var body struct {
+			Ticket struct {
+				Comment zendesk.TicketComment `json:"comment"`
+			} `json:"ticket"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		assert.Equal(t, "Test note body", body.Ticket.Comment.Body)
+		assert.NotNil(t, body.Ticket.Comment.Public)
+		assert.False(t, *body.Ticket.Comment.Public)
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{})
+	}))
+	defer server.Close()
+
+	client := createTestZendeskClientWithLibrary(server)
+	err := client.AddInternalNote(200, "Test note body")
+	assert.NoError(t, err)
+}
+
+func TestAddInternalNote_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := createTestZendeskClientWithLibrary(server)
+	err := client.AddInternalNote(200, "Test note")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to add internal note")
+}
+
+// createTestZendeskClientWithLibrary creates a ZendeskClient with a real
+// go-zendesk Client that points at the given test server, for testing methods
+// that use the library client (AssignTicket, AddInternalNote, etc.).
+func createTestZendeskClientWithLibrary(server *httptest.Server) *ZendeskClient {
+	zdClient, _ := zendesk.NewClient(server.Client())
+	zdClient.SetEndpointURL(server.URL)
+	zdClient.SetCredential(zendesk.NewAPITokenCredential("test@example.com", "test-token"))
+
+	return &ZendeskClient{
+		client:            zdClient,
+		httpClient:        server.Client(),
+		Subdomain:         "test",
+		Email:             "test@example.com",
+		APIToken:          "test-token",
+		requesterCache:    make(map[int64]*User),
+		organizationCache: make(map[int64]*Organization),
+	}
 }

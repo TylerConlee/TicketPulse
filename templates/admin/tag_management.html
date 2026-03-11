@@ -1,40 +1,42 @@
 {{define "content"}}
-<div class="row">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-striped table-hover">
-                        <thead class="table-dark">
-                            <tr>
-                                <th>ID</th>
-                                <th>Tag</th>
-                                <th>Slack Channel</th>
-                                <th>Alert Type</th>
-                                <th>User</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {{range .TagAlerts}}
-                            <tr>
-                                <td>{{.ID}}</td>
-                                <td>{{.Tag}}</td>
-                                <td>{{.SlackChannelID}}</td>
-                                <td>{{.AlertType}}</td>
-                                <td>{{.User.Name}} ({{.User.Email}})</td>
-                                <td>
-                                    <form method="POST" action="/admin/tag/delete/{{.ID}}" class="d-inline">
-                                        <button type="submit" class="btn btn-sm btn-gradient-danger" onclick="return confirm('Are you sure you want to delete this tag alert?');">Delete</button>
-                                    </form>
-                                </td>
-                            </tr>
-                            {{end}}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
+<div class="bg-white rounded-xl border border-gray-200 shadow-sm">
+  <div class="px-6 py-4 border-b border-gray-100">
+    <h3 class="text-sm font-semibold text-gray-900">Tag Alerts</h3>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-gray-100">
+          <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">ID</th>
+          <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Tag</th>
+          <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Channel</th>
+          <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Alert Type</th>
+          <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">User</th>
+          <th class="text-right px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-50">
+        {{range .TagAlerts}}
+        <tr class="hover:bg-gray-50">
+          <td class="px-6 py-3 text-gray-500 tabular-nums">{{.ID}}</td>
+          <td class="px-6 py-3"><span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{{.Tag}}</span></td>
+          <td class="px-6 py-3 text-gray-600">{{.SlackChannelID}}</td>
+          <td class="px-6 py-3 text-gray-600">{{.AlertType}}</td>
+          <td class="px-6 py-3 text-gray-600">{{.User.Name}} <span class="text-gray-400">({{.User.Email}})</span></td>
+          <td class="px-6 py-3 text-right">
+            <form method="POST" action="/admin/tag/delete/{{.ID}}" class="inline" onsubmit="return confirm('Delete this tag alert?');">
+              {{$.CSRFField}}
+              <button type="submit" class="text-red-600 hover:text-red-800 text-sm font-medium transition-colors">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {{else}}
+        <tr>
+          <td colspan="6" class="px-6 py-8 text-center text-gray-400">No tag alerts configured.</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
 </div>
 {{end}}

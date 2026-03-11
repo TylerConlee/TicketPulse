@@ -248,6 +248,30 @@ func TestFilterTicketsWithActiveSLA(t *testing.T) {
 	}
 }
 
+func TestTruncateDescription(t *testing.T) {
+	tests := []struct {
+		name      string
+		desc      string
+		wordCount int
+		expected  string
+	}{
+		{"short description stays", "Hello world", 5, "Hello world"},
+		{"exact word count", "one two three", 3, "one two three"},
+		{"truncates with ellipsis", "one two three four five six", 3, "one two three..."},
+		{"empty string", "", 5, ""},
+		{"single word within limit", "hello", 5, "hello"},
+		{"single word at limit", "hello", 1, "hello"},
+		{"two words truncated to one", "hello world", 1, "hello..."},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := truncateDescription(tt.desc, tt.wordCount)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestSummaryFilterConstants(t *testing.T) {
 	// Verify filter constants are defined correctly
 	assert.Equal(t, "all_tags", TagFilterAllTags)

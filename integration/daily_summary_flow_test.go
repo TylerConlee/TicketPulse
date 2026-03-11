@@ -170,11 +170,11 @@ func TestDailySummaryWithTagAlerts(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create some tag alerts for the user
-	err = models.CreateTagAlert(database, user.ID, "billing", "C12345", services.AlertTypeSLAReply)
+	err = models.CreateTagAlert(database, user.ID, "billing", "C12345", "general", services.AlertTypeSLAReply)
 	require.NoError(t, err)
-	err = models.CreateTagAlert(database, user.ID, "urgent", "C12345", services.AlertTypeSLAResolution)
+	err = models.CreateTagAlert(database, user.ID, "urgent", "C12345", "general", services.AlertTypeSLAResolution)
 	require.NoError(t, err)
-	err = models.CreateTagAlert(database, user.ID, "billing", "C67890", services.AlertTypeNewTicket) // Duplicate tag
+	err = models.CreateTagAlert(database, user.ID, "billing", "C67890", "billing-team", services.AlertTypeNewTicket)
 	require.NoError(t, err)
 
 	// Retrieve user's tag alerts
@@ -299,7 +299,7 @@ func TestDailySummarySettingsComplete(t *testing.T) {
 	require.NoError(t, err)
 
 	// 4. Create tag alerts
-	err = models.CreateTagAlert(database, user.ID, "priority", "C12345", services.AlertTypeSLAReply)
+	err = models.CreateTagAlert(database, user.ID, "priority", "C12345", "general", services.AlertTypeSLAReply)
 	require.NoError(t, err)
 
 	// 5. Update Slack user ID

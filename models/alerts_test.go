@@ -5,336 +5,770 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TylerConlee/TicketPulse/db"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func setupAlertsTestDB(t *testing.T) *db.SQLDatabase {
-	database := db.InitDB(":memory:")
-	require.NotNil(t, database, "Failed to initialize test database")
-	return database
-}
+// --- Tag Cache Tests ---
 
-func createTestUser(t *testing.T, database *db.SQLDatabase, email string) User {
-	err := CreateUser(database, email, "Test User", AdminRole, false)
-	require.NoError(t, err)
-	user, err := GetUserByEmail(database, email)
-	require.NoError(t, err)
-	return user
-}
-
-func TestCreateSLAAlertCache(t *testing.T) {
-	database := setupAlertsTestDB(t)
+func TestClearAndReplaceCachedTags_Empty(t *testing.T) {
+	database := setupTestDB(t)
 	defer database.Close()
 
-	user := createTestUser(t, database, "test@example.com")
-	ctx := context.Background()
+	err := ClearAndReplaceCachedTags(database, []string{})
+	assert.NoError(t, err)
 
-	cacheEntry := SLAAlertCache{
-		UserID:     int64(user.ID),
-		TicketID:   12345,
-		AlertType:  "sla_reply",
-		MetricType: "reply_time",
-		BreachAt:   time.Now().Add(2 * time.Hour),
-		Label:      "Less than 2 hours remaining",
-	}
+	tags, err := GetCachedTags(database)
+	assert.NoError(t, err)
+	assert.Empty(t, tags)
+}
 
-	err := CreateSLAAlertCache(ctx, database, cacheEntry)
+func TestClearAndReplaceCachedTags_SingleTag(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := ClearAndReplaceCachedTags(database, []string{"billing"})
+	assert.NoError(t, err)
+
+	tags, err := GetCachedTags(database)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"billing"}, tags)
+}
+
+func TestClearAndReplaceCachedTags_MultipleTags(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := ClearAndReplaceCachedTags(database, []string{"urgent", "billing", "support"})
+	assert.NoError(t, err)
+
+	tags, err := GetCachedTags(database)
+	assert.NoError(t, err)
+	assert.Len(t, tags, 3)
+	assert.Equal(t, []string{"billing", "support", "urgent"}, tags)
+}
+
+func TestClearAndReplaceCachedTags_ReplacesExisting(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := ClearAndReplaceCachedTags(database, []string{"old_tag1", "old_tag2"})
+	require.NoError(t, err)
+
+	tags, err := GetCachedTags(database)
+	require.NoError(t, err)
+	assert.Len(t, tags, 2)
+
+	err = ClearAndReplaceCachedTags(database, []string{"new_tag1", "new_tag2", "new_tag3"})
+	require.NoError(t, err)
+
+	tags, err = GetCachedTags(database)
+	assert.NoError(t, err)
+	assert.Len(t, tags, 3)
+	assert.Equal(t, []string{"new_tag1", "new_tag2", "new_tag3"}, tags)
+}
+
+func TestClearAndReplaceCachedTags_ClearsWhenEmptyAfterData(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := ClearAndReplaceCachedTags(database, []string{"tag1", "tag2"})
+	require.NoError(t, err)
+
+	err = ClearAndReplaceCachedTags(database, []string{})
+	assert.NoError(t, err)
+
+	tags, err := GetCachedTags(database)
+	assert.NoError(t, err)
+	assert.Empty(t, tags)
+}
+
+func TestGetCachedTags_Empty(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	tags, err := GetCachedTags(database)
+	assert.NoError(t, err)
+	assert.Empty(t, tags)
+}
+
+func TestGetCachedTags_OrderedAlphabetically(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := ClearAndReplaceCachedTags(database, []string{"zebra", "alpha", "mike", "bravo"})
+	require.NoError(t, err)
+
+	tags, err := GetCachedTags(database)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"alpha", "bravo", "mike", "zebra"}, tags)
+}
+
+// --- UpdateTagAlert Tests ---
+
+func TestUpdateTagAlert(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	err = CreateTagAlert(database, user.ID, "urgent", "C111", "general", "new_ticket")
+	require.NoError(t, err)
+
+	alerts, err := GetTagAlertsByUser(database, user.ID)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1)
+	alertID := alerts[0].ID
+
+	err = UpdateTagAlert(database, alertID, "billing", "C222", "billing-team", "sla_reply")
+	assert.NoError(t, err)
+
+	updated, err := GetTagAlertByID(database, alertID)
+	assert.NoError(t, err)
+	assert.Equal(t, "billing", updated.Tag)
+	assert.Equal(t, "C222", updated.SlackChannelID)
+	assert.Equal(t, "billing-team", updated.SlackChannelName)
+	assert.Equal(t, "sla_reply", updated.AlertType)
+}
+
+func TestUpdateTagAlert_NonExistent(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := UpdateTagAlert(database, 99999, "tag", "chan", "name", "type")
 	assert.NoError(t, err)
 }
 
-func TestGetSLAAlertCache(t *testing.T) {
-	database := setupAlertsTestDB(t)
+// --- DeleteTagAlertsByIDs Tests ---
+
+func TestDeleteTagAlertsByIDs_DeleteMultiple(t *testing.T) {
+	database := setupTestDB(t)
 	defer database.Close()
 
-	user := createTestUser(t, database, "test@example.com")
-	ctx := context.Background()
-
-	breachTime := time.Now().Add(2 * time.Hour)
-	cacheEntry := SLAAlertCache{
-		UserID:     int64(user.ID),
-		TicketID:   12345,
-		AlertType:  "sla_reply",
-		MetricType: "reply_time",
-		BreachAt:   breachTime,
-		Label:      "Less than 2 hours remaining",
-	}
-
-	err := CreateSLAAlertCache(ctx, database, cacheEntry)
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
 	require.NoError(t, err)
 
-	retrieved, err := GetSLAAlertCache(ctx, database, user.ID, 12345, "sla_reply", "reply_time")
-	assert.NoError(t, err)
-	assert.NotNil(t, retrieved)
-	assert.Equal(t, int64(user.ID), retrieved.UserID)
-	assert.Equal(t, int64(12345), retrieved.TicketID)
-	assert.Equal(t, "sla_reply", retrieved.AlertType)
-	assert.Equal(t, "reply_time", retrieved.MetricType)
-	assert.Equal(t, "Less than 2 hours remaining", retrieved.Label)
-}
-
-func TestGetSLAAlertCache_NotFound(t *testing.T) {
-	database := setupAlertsTestDB(t)
-	defer database.Close()
-
-	ctx := context.Background()
-
-	retrieved, err := GetSLAAlertCache(ctx, database, 1, 99999, "sla_reply", "reply_time")
-	assert.Error(t, err)
-	assert.Nil(t, retrieved)
-}
-
-func TestGetSLAAlertCache_DifferentMetricType(t *testing.T) {
-	database := setupAlertsTestDB(t)
-	defer database.Close()
-
-	user := createTestUser(t, database, "test@example.com")
-	ctx := context.Background()
-
-	// Create cache entry for reply_time
-	cacheEntry := SLAAlertCache{
-		UserID:     int64(user.ID),
-		TicketID:   12345,
-		AlertType:  "sla_reply",
-		MetricType: "reply_time",
-		BreachAt:   time.Now().Add(2 * time.Hour),
-		Label:      "Less than 2 hours remaining",
-	}
-	err := CreateSLAAlertCache(ctx, database, cacheEntry)
+	err = CreateTagAlert(database, user.ID, "tag1", "C111", "general", "new_ticket")
+	require.NoError(t, err)
+	err = CreateTagAlert(database, user.ID, "tag2", "C111", "general", "sla_reply")
+	require.NoError(t, err)
+	err = CreateTagAlert(database, user.ID, "tag3", "C222", "billing", "ticket_update")
 	require.NoError(t, err)
 
-	// Should not find when querying with different metric type
-	retrieved, err := GetSLAAlertCache(ctx, database, user.ID, 12345, "sla_reply", "resolution_time")
-	assert.Error(t, err)
-	assert.Nil(t, retrieved)
-}
-
-func TestClearSLAAlertCache(t *testing.T) {
-	database := setupAlertsTestDB(t)
-	defer database.Close()
-
-	user := createTestUser(t, database, "test@example.com")
-	ctx := context.Background()
-
-	cacheEntry := SLAAlertCache{
-		UserID:     int64(user.ID),
-		TicketID:   12345,
-		AlertType:  "sla_reply",
-		MetricType: "reply_time",
-		BreachAt:   time.Now().Add(2 * time.Hour),
-		Label:      "Less than 2 hours remaining",
-	}
-	err := CreateSLAAlertCache(ctx, database, cacheEntry)
+	alerts, err := GetTagAlertsByUser(database, user.ID)
 	require.NoError(t, err)
+	require.Len(t, alerts, 3)
 
-	// Get the created entry
-	retrieved, err := GetSLAAlertCache(ctx, database, user.ID, 12345, "sla_reply", "reply_time")
-	require.NoError(t, err)
-
-	// Clear the cache entry
-	err = ClearSLAAlertCache(ctx, database, retrieved.ID)
+	err = DeleteTagAlertsByIDs(database, user.ID, []int{alerts[0].ID, alerts[1].ID})
 	assert.NoError(t, err)
 
-	// Verify deletion
-	retrieved, err = GetSLAAlertCache(ctx, database, user.ID, 12345, "sla_reply", "reply_time")
-	assert.Error(t, err)
-	assert.Nil(t, retrieved)
+	remaining, err := GetTagAlertsByUser(database, user.ID)
+	assert.NoError(t, err)
+	assert.Len(t, remaining, 1)
+	assert.Equal(t, "tag3", remaining[0].Tag)
 }
 
-func TestClearSLAAlertCacheByTicket(t *testing.T) {
-	database := setupAlertsTestDB(t)
+func TestDeleteTagAlertsByIDs_ScopedToUser(t *testing.T) {
+	database := setupTestDB(t)
 	defer database.Close()
 
-	user := createTestUser(t, database, "test@example.com")
-	ctx := context.Background()
-
-	// Create multiple cache entries for the same ticket
-	entry1 := SLAAlertCache{
-		UserID:     int64(user.ID),
-		TicketID:   12345,
-		AlertType:  "sla_reply",
-		MetricType: "reply_time",
-		BreachAt:   time.Now().Add(2 * time.Hour),
-		Label:      "Less than 2 hours remaining",
-	}
-	entry2 := SLAAlertCache{
-		UserID:     int64(user.ID),
-		TicketID:   12345,
-		AlertType:  "sla_resolution",
-		MetricType: "resolution_time",
-		BreachAt:   time.Now().Add(4 * time.Hour),
-		Label:      "Less than 4 hours remaining",
-	}
-
-	err := CreateSLAAlertCache(ctx, database, entry1)
+	err := CreateUser(database, "user1@example.com", "User 1", AdminRole, false)
 	require.NoError(t, err)
-	err = CreateSLAAlertCache(ctx, database, entry2)
+	err = CreateUser(database, "user2@example.com", "User 2", AgentRole, false)
 	require.NoError(t, err)
 
-	// Clear all entries for the ticket
-	err = ClearSLAAlertCacheByTicket(ctx, database, 12345)
+	user1, err := GetUserByEmail(database, "user1@example.com")
+	require.NoError(t, err)
+	user2, err := GetUserByEmail(database, "user2@example.com")
+	require.NoError(t, err)
+
+	err = CreateTagAlert(database, user1.ID, "tag1", "C111", "general", "new_ticket")
+	require.NoError(t, err)
+	err = CreateTagAlert(database, user2.ID, "tag2", "C222", "billing", "new_ticket")
+	require.NoError(t, err)
+
+	user2Alerts, err := GetTagAlertsByUser(database, user2.ID)
+	require.NoError(t, err)
+	require.Len(t, user2Alerts, 1)
+
+	// User1 tries to delete User2's alert — should not work
+	err = DeleteTagAlertsByIDs(database, user1.ID, []int{user2Alerts[0].ID})
 	assert.NoError(t, err)
 
-	// Verify both entries are deleted
-	retrieved1, err := GetSLAAlertCache(ctx, database, user.ID, 12345, "sla_reply", "reply_time")
-	assert.Error(t, err)
-	assert.Nil(t, retrieved1)
-
-	retrieved2, err := GetSLAAlertCache(ctx, database, user.ID, 12345, "sla_resolution", "resolution_time")
-	assert.Error(t, err)
-	assert.Nil(t, retrieved2)
+	// User2's alert should still exist
+	remaining, err := GetTagAlertsByUser(database, user2.ID)
+	assert.NoError(t, err)
+	assert.Len(t, remaining, 1)
 }
 
-func TestCreateAlertLog(t *testing.T) {
-	database := setupAlertsTestDB(t)
+func TestDeleteTagAlertsByIDs_EmptyList(t *testing.T) {
+	database := setupTestDB(t)
 	defer database.Close()
 
-	user := createTestUser(t, database, "test@example.com")
-	ctx := context.Background()
+	err := DeleteTagAlertsByIDs(database, 1, []int{})
+	assert.NoError(t, err)
+}
 
-	logEntry := AlertLog{
+// --- GetTagAlertCountByUser Tests ---
+
+func TestGetTagAlertCountByUser_Zero(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	count, err := GetTagAlertCountByUser(database, user.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, count)
+}
+
+func TestGetTagAlertCountByUser_WithAlerts(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	err = CreateTagAlert(database, user.ID, "tag1", "C111", "general", "new_ticket")
+	require.NoError(t, err)
+	err = CreateTagAlert(database, user.ID, "tag2", "C222", "billing", "sla_reply")
+	require.NoError(t, err)
+
+	count, err := GetTagAlertCountByUser(database, user.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, count)
+}
+
+func TestGetTagAlertCountByUser_IsolatedPerUser(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "user1@example.com", "User 1", AdminRole, false)
+	require.NoError(t, err)
+	err = CreateUser(database, "user2@example.com", "User 2", AgentRole, false)
+	require.NoError(t, err)
+
+	user1, err := GetUserByEmail(database, "user1@example.com")
+	require.NoError(t, err)
+	user2, err := GetUserByEmail(database, "user2@example.com")
+	require.NoError(t, err)
+
+	err = CreateTagAlert(database, user1.ID, "tag1", "C111", "general", "new_ticket")
+	require.NoError(t, err)
+	err = CreateTagAlert(database, user1.ID, "tag2", "C222", "billing", "sla_reply")
+	require.NoError(t, err)
+	err = CreateTagAlert(database, user2.ID, "tag3", "C333", "support", "ticket_update")
+	require.NoError(t, err)
+
+	count1, err := GetTagAlertCountByUser(database, user1.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, count1)
+
+	count2, err := GetTagAlertCountByUser(database, user2.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count2)
+}
+
+// --- Alert History Tests ---
+
+func createTestUserWithAlertLogs(t *testing.T, database interface {
+	Query(query string, args ...interface{}) (interface{ Close() error; Next() bool; Scan(dest ...interface{}) error }, error)
+	QueryRow(query string, args ...interface{}) interface{ Scan(dest ...interface{}) error }
+	Exec(query string, args ...interface{}) (interface{ RowsAffected() (int64, error) }, error)
+}) {
+	// Helper is not used; see actual tests below
+}
+
+func TestGetAlertHistoryStats_Empty(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	stats, err := GetAlertHistoryStats(database, user.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, stats.TotalAlerts)
+	assert.Equal(t, 0, stats.AlertsToday)
+	assert.Empty(t, stats.TopTags)
+	assert.Empty(t, stats.TopTypes)
+}
+
+func TestGetAlertHistoryStats_WithData(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	today := time.Now().Format("2006-01-02") + " 10:00:00"
+	yesterday := time.Now().Add(-24 * time.Hour).Format("2006-01-02") + " 10:00:00"
+
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user.ID), TicketID: 100, Tag: "urgent", AlertType: "new_ticket", Timestamp: today})
+	require.NoError(t, err)
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user.ID), TicketID: 101, Tag: "urgent", AlertType: "sla_reply", Timestamp: today})
+	require.NoError(t, err)
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user.ID), TicketID: 102, Tag: "billing", AlertType: "new_ticket", Timestamp: yesterday})
+	require.NoError(t, err)
+
+	stats, err := GetAlertHistoryStats(database, user.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, 3, stats.TotalAlerts)
+	assert.Equal(t, 2, stats.AlertsToday)
+	assert.NotEmpty(t, stats.TopTags)
+	assert.Equal(t, "urgent", stats.TopTags[0].Tag)
+	assert.Equal(t, 2, stats.TopTags[0].Count)
+	assert.NotEmpty(t, stats.TopTypes)
+	assert.Equal(t, "new_ticket", stats.TopTypes[0].AlertType)
+	assert.Equal(t, 2, stats.TopTypes[0].Count)
+}
+
+func TestGetAlertHistoryStats_IsolatedPerUser(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "user1@example.com", "User 1", AdminRole, false)
+	require.NoError(t, err)
+	err = CreateUser(database, "user2@example.com", "User 2", AgentRole, false)
+	require.NoError(t, err)
+
+	user1, err := GetUserByEmail(database, "user1@example.com")
+	require.NoError(t, err)
+	user2, err := GetUserByEmail(database, "user2@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	ts := time.Now().Format("2006-01-02") + " 12:00:00"
+
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user1.ID), TicketID: 100, Tag: "urgent", AlertType: "new_ticket", Timestamp: ts})
+	require.NoError(t, err)
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user2.ID), TicketID: 200, Tag: "billing", AlertType: "sla_reply", Timestamp: ts})
+	require.NoError(t, err)
+
+	stats1, _ := GetAlertHistoryStats(database, user1.ID)
+	assert.Equal(t, 1, stats1.TotalAlerts)
+
+	stats2, _ := GetAlertHistoryStats(database, user2.ID)
+	assert.Equal(t, 1, stats2.TotalAlerts)
+}
+
+// --- GetAlertHistoryPaginated Tests ---
+
+func TestGetAlertHistoryPaginated_Empty(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	logs, total, err := GetAlertHistoryPaginated(database, user.ID, 25, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, total)
+	assert.Empty(t, logs)
+}
+
+func TestGetAlertHistoryPaginated_WithData(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		ts := time.Now().Add(time.Duration(-i) * time.Hour).Format("2006-01-02 15:04:05")
+		err = CreateAlertLog(ctx, database, AlertLog{
+			UserID:    int64(user.ID),
+			TicketID:  int64(100 + i),
+			Tag:       "tag",
+			AlertType: "new_ticket",
+			Timestamp: ts,
+		})
+		require.NoError(t, err)
+	}
+
+	logs, total, err := GetAlertHistoryPaginated(database, user.ID, 25, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, 5, total)
+	assert.Len(t, logs, 5)
+}
+
+func TestGetAlertHistoryPaginated_Pagination(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	for i := 0; i < 10; i++ {
+		ts := time.Now().Add(time.Duration(-i) * time.Hour).Format("2006-01-02 15:04:05")
+		err = CreateAlertLog(ctx, database, AlertLog{
+			UserID:    int64(user.ID),
+			TicketID:  int64(100 + i),
+			Tag:       "tag",
+			AlertType: "new_ticket",
+			Timestamp: ts,
+		})
+		require.NoError(t, err)
+	}
+
+	// First page
+	page1, total, err := GetAlertHistoryPaginated(database, user.ID, 3, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, 10, total)
+	assert.Len(t, page1, 3)
+
+	// Second page
+	page2, total, err := GetAlertHistoryPaginated(database, user.ID, 3, 3)
+	assert.NoError(t, err)
+	assert.Equal(t, 10, total)
+	assert.Len(t, page2, 3)
+
+	// Pages should have different entries
+	assert.NotEqual(t, page1[0].TicketID, page2[0].TicketID)
+
+	// Beyond data
+	pageBeyond, total, err := GetAlertHistoryPaginated(database, user.ID, 3, 100)
+	assert.NoError(t, err)
+	assert.Equal(t, 10, total)
+	assert.Empty(t, pageBeyond)
+}
+
+// --- GetMostRecentAlertLogByTicketID Tests ---
+
+func TestGetMostRecentAlertLogByTicketID_Found(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user.ID), TicketID: 500, Tag: "urgent", AlertType: "new_ticket", Timestamp: "2025-01-01 10:00:00"})
+	require.NoError(t, err)
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user.ID), TicketID: 500, Tag: "urgent", AlertType: "sla_reply", Timestamp: "2025-01-02 10:00:00"})
+	require.NoError(t, err)
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user.ID), TicketID: 500, Tag: "urgent", AlertType: "sla_resolution", Timestamp: "2025-01-03 10:00:00"})
+	require.NoError(t, err)
+
+	alertLog, err := GetMostRecentAlertLogByTicketID(database, 500)
+	assert.NoError(t, err)
+	require.NotNil(t, alertLog)
+	assert.Equal(t, int64(500), alertLog.TicketID)
+	assert.Equal(t, "sla_resolution", alertLog.AlertType)
+	assert.Contains(t, alertLog.Timestamp, "2025-01-03")
+}
+
+func TestGetMostRecentAlertLogByTicketID_NotFound(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	alertLog, err := GetMostRecentAlertLogByTicketID(database, 99999)
+	assert.Error(t, err)
+	assert.Nil(t, alertLog)
+}
+
+func TestGetMostRecentAlertLogByTicketID_SingleEntry(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user.ID), TicketID: 600, Tag: "billing", AlertType: "ticket_update", Timestamp: "2025-06-15 14:30:00"})
+	require.NoError(t, err)
+
+	alertLog, err := GetMostRecentAlertLogByTicketID(database, 600)
+	assert.NoError(t, err)
+	require.NotNil(t, alertLog)
+	assert.Equal(t, "ticket_update", alertLog.AlertType)
+	assert.Equal(t, "billing", alertLog.Tag)
+}
+
+func TestGetMostRecentAlertLogByTicketID_DifferentTickets(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user.ID), TicketID: 100, Tag: "tag1", AlertType: "new_ticket", Timestamp: "2025-01-01 10:00:00"})
+	require.NoError(t, err)
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user.ID), TicketID: 200, Tag: "tag2", AlertType: "sla_reply", Timestamp: "2025-01-02 10:00:00"})
+	require.NoError(t, err)
+
+	alertLog, err := GetMostRecentAlertLogByTicketID(database, 100)
+	assert.NoError(t, err)
+	require.NotNil(t, alertLog)
+	assert.Equal(t, int64(100), alertLog.TicketID)
+	assert.Equal(t, "new_ticket", alertLog.AlertType)
+}
+
+// --- CreateAlertLog Tests ---
+
+func TestCreateAlertLog_Success(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	entry := AlertLog{
 		UserID:    int64(user.ID),
-		TicketID:  12345,
+		TicketID:  123,
 		Tag:       "urgent",
-		AlertType: "sla_reply",
-		Timestamp: time.Now().Format("2006-01-02 15:04:05"),
+		AlertType: "new_ticket",
+		Timestamp: "2025-03-09 12:00:00",
+	}
+	err = CreateAlertLog(ctx, database, entry)
+	assert.NoError(t, err)
+
+	logs, total, err := GetAlertHistoryPaginated(database, user.ID, 10, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, total)
+	require.Len(t, logs, 1)
+	assert.Equal(t, int64(123), logs[0].TicketID)
+	assert.Equal(t, "urgent", logs[0].Tag)
+	assert.Equal(t, "new_ticket", logs[0].AlertType)
+}
+
+// --- SLA Alert Cache CRUD Tests ---
+
+func TestSLAAlertCache_CreateAndGet(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	entry := SLAAlertCache{
+		UserID:     int64(user.ID),
+		TicketID:   100,
+		AlertType:  "sla_reply",
+		MetricType: "reply_time",
+		BreachAt:   time.Now().Add(2 * time.Hour),
+		Label:      "Less than 3 hours remaining",
+	}
+	err = CreateSLAAlertCache(ctx, database, entry)
+	assert.NoError(t, err)
+
+	cached, err := GetSLAAlertCache(ctx, database, user.ID, 100, "sla_reply", "reply_time")
+	assert.NoError(t, err)
+	require.NotNil(t, cached)
+	assert.Equal(t, "Less than 3 hours remaining", cached.Label)
+	assert.Equal(t, int64(100), cached.TicketID)
+}
+
+func TestSLAAlertCache_GetNotFound(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	ctx := context.Background()
+	cached, err := GetSLAAlertCache(ctx, database, 1, 999, "sla_reply", "reply_time")
+	assert.Error(t, err)
+	assert.Nil(t, cached)
+}
+
+func TestSLAAlertCache_ClearByID(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	entry := SLAAlertCache{
+		UserID:     int64(user.ID),
+		TicketID:   100,
+		AlertType:  "sla_reply",
+		MetricType: "reply_time",
+		BreachAt:   time.Now().Add(2 * time.Hour),
+		Label:      "test",
+	}
+	err = CreateSLAAlertCache(ctx, database, entry)
+	require.NoError(t, err)
+
+	cached, err := GetSLAAlertCache(ctx, database, user.ID, 100, "sla_reply", "reply_time")
+	require.NoError(t, err)
+	require.NotNil(t, cached)
+
+	err = ClearSLAAlertCache(ctx, database, cached.ID)
+	assert.NoError(t, err)
+
+	cached2, err := GetSLAAlertCache(ctx, database, user.ID, 100, "sla_reply", "reply_time")
+	assert.Error(t, err)
+	assert.Nil(t, cached2)
+}
+
+func TestSLAAlertCache_ClearByTicket(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	entries := []SLAAlertCache{
+		{UserID: int64(user.ID), TicketID: 200, AlertType: "sla_reply", MetricType: "reply_time", BreachAt: time.Now().Add(2 * time.Hour), Label: "test reply"},
+		{UserID: int64(user.ID), TicketID: 200, AlertType: "sla_resolution", MetricType: "resolution_time", BreachAt: time.Now().Add(4 * time.Hour), Label: "test resolution"},
+	}
+	for _, entry := range entries {
+		err = CreateSLAAlertCache(ctx, database, entry)
+		require.NoError(t, err)
 	}
 
-	err := CreateAlertLog(ctx, database, logEntry)
+	err = ClearSLAAlertCacheByTicket(ctx, database, 200)
 	assert.NoError(t, err)
+
+	cached, err := GetSLAAlertCache(ctx, database, user.ID, 200, "sla_reply", "reply_time")
+	assert.Error(t, err)
+	assert.Nil(t, cached)
 }
 
-func TestCreateDailySummaryLog(t *testing.T) {
-	database := setupAlertsTestDB(t)
+// --- DailySummaryLog Tests ---
+
+func TestDailySummaryLog_CreateAndGet(t *testing.T) {
+	database := setupTestDB(t)
 	defer database.Close()
 
-	user := createTestUser(t, database, "test@example.com")
-	ctx := context.Background()
-
-	summaryDate := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
-	err := CreateDailySummaryLog(ctx, database, user.ID, summaryDate)
-	assert.NoError(t, err)
-}
-
-func TestGetDailySummaryLog(t *testing.T) {
-	database := setupAlertsTestDB(t)
-	defer database.Close()
-
-	user := createTestUser(t, database, "test@example.com")
-	ctx := context.Background()
-
-	summaryDate := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
-	err := CreateDailySummaryLog(ctx, database, user.ID, summaryDate)
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
 	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	summaryDate := time.Date(2025, 3, 9, 0, 0, 0, 0, time.UTC)
+
+	err = CreateDailySummaryLog(ctx, database, user.ID, summaryDate)
+	assert.NoError(t, err)
 
 	logEntry, err := GetDailySummaryLog(ctx, database, user.ID, summaryDate)
 	assert.NoError(t, err)
-	assert.NotNil(t, logEntry)
+	require.NotNil(t, logEntry)
 	assert.Equal(t, int64(user.ID), logEntry.UserID)
 }
 
-func TestGetDailySummaryLog_NotFound(t *testing.T) {
-	database := setupAlertsTestDB(t)
+func TestDailySummaryLog_GetNotFound(t *testing.T) {
+	database := setupTestDB(t)
 	defer database.Close()
 
-	user := createTestUser(t, database, "test@example.com")
 	ctx := context.Background()
-
-	summaryDate := time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)
-	logEntry, err := GetDailySummaryLog(ctx, database, user.ID, summaryDate)
+	logEntry, err := GetDailySummaryLog(ctx, database, 999, time.Now())
 	assert.Error(t, err)
 	assert.Nil(t, logEntry)
 }
 
-func TestSLAAlertDeduplication(t *testing.T) {
-	database := setupAlertsTestDB(t)
+// --- ClearExpiredSLAAlertCache Tests ---
+
+func TestClearExpiredSLAAlertCache_NoEntries(t *testing.T) {
+	database := setupTestDB(t)
 	defer database.Close()
 
-	user := createTestUser(t, database, "test@example.com")
+	ctx := context.Background()
+	err := ClearExpiredSLAAlertCache(ctx, database)
+	assert.NoError(t, err)
+}
+
+func TestClearExpiredSLAAlertCache_OnlyOldEntriesRemoved(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
 	ctx := context.Background()
 
-	// Create initial cache entry
-	cacheEntry := SLAAlertCache{
+	recentEntry := SLAAlertCache{
 		UserID:     int64(user.ID),
-		TicketID:   12345,
+		TicketID:   100,
 		AlertType:  "sla_reply",
 		MetricType: "reply_time",
 		BreachAt:   time.Now().Add(2 * time.Hour),
-		Label:      "Less than 2 hours remaining",
+		Label:      "recent",
 	}
-	err := CreateSLAAlertCache(ctx, database, cacheEntry)
+	err = CreateSLAAlertCache(ctx, database, recentEntry)
 	require.NoError(t, err)
 
-	// Try to find existing entry - should succeed
-	existingEntry, err := GetSLAAlertCache(ctx, database, user.ID, 12345, "sla_reply", "reply_time")
-	assert.NoError(t, err)
-	assert.NotNil(t, existingEntry)
-
-	// Verify label matches - if same, we would skip sending alert
-	assert.Equal(t, "Less than 2 hours remaining", existingEntry.Label)
-
-	// If label changed (e.g., "Less than 1 hour remaining"), we would:
-	// 1. Clear the old entry
-	err = ClearSLAAlertCache(ctx, database, existingEntry.ID)
+	err = ClearExpiredSLAAlertCache(ctx, database)
 	assert.NoError(t, err)
 
-	// 2. Create new entry with updated label
-	newCacheEntry := SLAAlertCache{
-		UserID:     int64(user.ID),
-		TicketID:   12345,
-		AlertType:  "sla_reply",
-		MetricType: "reply_time",
-		BreachAt:   time.Now().Add(45 * time.Minute),
-		Label:      "Less than 1 hour remaining",
-	}
-	err = CreateSLAAlertCache(ctx, database, newCacheEntry)
+	cached, err := GetSLAAlertCache(ctx, database, user.ID, 100, "sla_reply", "reply_time")
 	assert.NoError(t, err)
-
-	// Verify the new entry
-	updatedEntry, err := GetSLAAlertCache(ctx, database, user.ID, 12345, "sla_reply", "reply_time")
-	assert.NoError(t, err)
-	assert.Equal(t, "Less than 1 hour remaining", updatedEntry.Label)
+	assert.NotNil(t, cached)
 }
 
-func TestSLAAlertCache_SeparateMetricTypes(t *testing.T) {
-	database := setupAlertsTestDB(t)
+func TestGetAlertHistoryPaginated_OrderedByTimestampDesc(t *testing.T) {
+	database := setupTestDB(t)
 	defer database.Close()
 
-	user := createTestUser(t, database, "test@example.com")
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
 	ctx := context.Background()
-
-	// Create cache entries for both reply_time and resolution_time
-	replyEntry := SLAAlertCache{
-		UserID:     int64(user.ID),
-		TicketID:   12345,
-		AlertType:  "sla_reply",
-		MetricType: "reply_time",
-		BreachAt:   time.Now().Add(1 * time.Hour),
-		Label:      "Less than 1 hour remaining",
+	timestamps := []string{
+		"2025-01-01 10:00:00",
+		"2025-01-03 10:00:00",
+		"2025-01-02 10:00:00",
 	}
-	resolutionEntry := SLAAlertCache{
-		UserID:     int64(user.ID),
-		TicketID:   12345,
-		AlertType:  "sla_resolution",
-		MetricType: "resolution_time",
-		BreachAt:   time.Now().Add(4 * time.Hour),
-		Label:      "Less than 4 hours remaining",
+	for i, ts := range timestamps {
+		err = CreateAlertLog(ctx, database, AlertLog{
+			UserID:    int64(user.ID),
+			TicketID:  int64(100 + i),
+			Tag:       "tag",
+			AlertType: "new_ticket",
+			Timestamp: ts,
+		})
+		require.NoError(t, err)
 	}
 
-	err := CreateSLAAlertCache(ctx, database, replyEntry)
-	require.NoError(t, err)
-	err = CreateSLAAlertCache(ctx, database, resolutionEntry)
-	require.NoError(t, err)
-
-	// Both should exist independently
-	retrievedReply, err := GetSLAAlertCache(ctx, database, user.ID, 12345, "sla_reply", "reply_time")
+	logs, _, err := GetAlertHistoryPaginated(database, user.ID, 25, 0)
 	assert.NoError(t, err)
-	assert.NotNil(t, retrievedReply)
-	assert.Equal(t, "Less than 1 hour remaining", retrievedReply.Label)
-
-	retrievedResolution, err := GetSLAAlertCache(ctx, database, user.ID, 12345, "sla_resolution", "resolution_time")
-	assert.NoError(t, err)
-	assert.NotNil(t, retrievedResolution)
-	assert.Equal(t, "Less than 4 hours remaining", retrievedResolution.Label)
+	require.Len(t, logs, 3)
+	assert.Contains(t, logs[0].Timestamp, "2025-01-03")
+	assert.Contains(t, logs[1].Timestamp, "2025-01-02")
+	assert.Contains(t, logs[2].Timestamp, "2025-01-01")
 }

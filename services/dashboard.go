@@ -32,7 +32,7 @@ func (ds *DashboardService) GetAlertStatsForUser(userID int) ([]AlertStats, erro
 		FROM 
 			alert_logs
 		WHERE 
-			user_id = $1
+			user_id = ?
 			AND timestamp >= DATE('now', '-14 days')
 		GROUP BY 
 			DATE(timestamp), alert_type, tag

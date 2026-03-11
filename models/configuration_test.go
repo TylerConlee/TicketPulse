@@ -8,6 +8,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func init() {
+	InitEncryption([]byte("test-session-key-that-is-32-byte"))
+}
+
 func setupConfigTestDB(t *testing.T) *db.SQLDatabase {
 	database := db.InitDB(":memory:")
 	require.NotNil(t, database, "Failed to initialize test database")
@@ -116,6 +120,25 @@ func TestSetConfiguration_SpecialCharacters(t *testing.T) {
 	value, err := GetConfiguration(database, "webhook_url")
 	assert.NoError(t, err)
 	assert.Equal(t, "https://hooks.slack.com/services/T00/B00/XXXX", value)
+}
+
+func TestSetDatabase(t *testing.T) {
+	database := setupConfigTestDB(t)
+	defer database.Close()
+
+	oldDB := Database
+	defer func() { Database = oldDB }()
+
+	SetDatabase(database)
+	assert.Equal(t, database, Database)
+}
+
+func TestSetDatabase_Nil(t *testing.T) {
+	oldDB := Database
+	defer func() { Database = oldDB }()
+
+	SetDatabase(nil)
+	assert.Nil(t, Database)
 }
 
 func TestSetConfiguration_LongValue(t *testing.T) {

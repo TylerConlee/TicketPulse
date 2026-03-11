@@ -1,0 +1,36 @@
+services:
+  ticketpulse:
+    build: .
+    image: tylerconlee/ticketpulse:latest
+    ports:
+      - "127.0.0.1:8080:8080"
+    env_file:
+      - .env
+    environment:
+      - DB_FILEPATH=/data/ticketpulse.db
+      - GO_ENV=production
+    volumes:
+      - ticketpulse-data:/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  ticketpulse-data:

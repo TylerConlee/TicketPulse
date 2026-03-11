@@ -1,251 +1,217 @@
 {{define "content"}}
-<div class="row">
-    <!-- User Information -->
-    <div class="col-md-6 grid-margin stretch-card">
-        <div class="card">
-            <div class="card-body">
-                <h4 class="card-title">Update Profile</h4>
-                <form method="post" action="/profile/update-profile">
-                    <!-- User Name -->
-                    <div class="form-group">
-                        <label for="userName">Name</label>
-                        <input type="text" class="form-control" id="userName" value="{{.User.Name}}" disabled>
-                    </div>
-
-                    <!-- Slack Email -->
-                    <div class="form-group">
-                        <label for="slackEmail">Slack Email</label>
-                        <input type="email" class="form-control" id="slackEmail" name="slack_email" placeholder="Enter Slack Email" value="{{.User.SlackUserID.String}}">
-                        <small class="form-text text-muted">This email is used to fetch your Slack ID. Leave empty to use your registered email.</small>
-                    </div>
-                    <button type="submit" class="btn btn-gradient-primary">Update Slack ID</button>
-                </form>
-            </div>
-        </div>
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <!-- Update Profile -->
+  <div class="bg-white rounded-xl border border-gray-200 shadow-sm">
+    <div class="px-6 py-4 border-b border-gray-100">
+      <h3 class="text-sm font-semibold text-gray-900">Update Profile</h3>
     </div>
-
-    <!-- Daily Summary Settings -->
-    <div class="col-md-6 grid-margin stretch-card">
-        <div class="card">
-            <div class="card-body">
-                <h4 class="card-title">Daily Summary Settings</h4>
-                <form method="post" action="/profile/update-summary-settings">
-                    <div class="form-group">
-                        <label>
-                            <input type="checkbox" name="daily_summary" {{if .User.DailySummary}}checked{{end}}> Enable Daily Summary
-                        </label>
-                    </div>
-                    <div class="form-group">
-                        <label for="summaryTime">Summary Time</label>
-                        <input type="time" class="form-control" id="summaryTime" name="summary_time" value="{{if .User.SummaryTime.Valid}}{{.User.SummaryTime.Time.Format "15:04"}}{{else}}09:00{{end}}">
-                    </div>
-                    <button type="submit" class="btn btn-gradient-primary">Save Summary Settings</button>
-                </form>
-                <button id="getSummaryNowBtn" class="btn btn-gradient-secondary mt-3" data-bs-toggle="modal" data-bs-target="#summaryModal">Get Summary Now</button>
-            </div>
+    <div class="p-6">
+      <form method="post" action="/profile/update-profile" class="space-y-4">
+        {{$.CSRFField}}
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+          <input type="text" value="{{.User.Name}}" disabled class="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-500">
         </div>
-    </div>
-</div>
-
-<!-- Work Day Settings -->
-<div class="row">
-    <div class="col-md-6 grid-margin stretch-card">
-        <div class="card">
-            <div class="card-body">
-                <h4 class="card-title">Work Day Settings</h4>
-                <form method="post" action="/profile/update-work-day-settings">
-                    <div class="form-group">
-                        <label for="work_day_start_time">Work Day Start Time</label>
-                        <input type="time" class="form-control" id="work_day_start_time" name="work_day_start_time" value="{{if .User.WorkDayStartTime.Valid}}{{.User.WorkDayStartTime.Time.Format "15:04"}}{{else}}09:00{{end}}" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="work_day_end_time">Work Day End Time</label>
-                        <input type="time" class="form-control" id="work_day_end_time" name="work_day_end_time" value="{{if .User.WorkDayEndTime.Valid}}{{.User.WorkDayEndTime.Time.Format "15:04"}}{{else}}17:00{{end}}" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="timezone">Timezone</label>
-                        <select class="form-control" id="timezone" name="timezone" required>
-                            <option value="UTC" {{if not .User.Timezone.Valid}}selected{{else}}{{if eq .User.Timezone.String "UTC"}}selected{{end}}{{end}}>UTC</option>
-                            <option value="America/New_York" {{if .User.Timezone.Valid}}{{if eq .User.Timezone.String "America/New_York"}}selected{{end}}{{end}}>America/New_York (EST/EDT)</option>
-                            <option value="America/Chicago" {{if .User.Timezone.Valid}}{{if eq .User.Timezone.String "America/Chicago"}}selected{{end}}{{end}}>America/Chicago (CST/CDT)</option>
-                            <option value="America/Denver" {{if .User.Timezone.Valid}}{{if eq .User.Timezone.String "America/Denver"}}selected{{end}}{{end}}>America/Denver (MST/MDT)</option>
-                            <option value="America/Los_Angeles" {{if .User.Timezone.Valid}}{{if eq .User.Timezone.String "America/Los_Angeles"}}selected{{end}}{{end}}>America/Los_Angeles (PST/PDT)</option>
-                            <option value="Europe/London" {{if .User.Timezone.Valid}}{{if eq .User.Timezone.String "Europe/London"}}selected{{end}}{{end}}>Europe/London (GMT/BST)</option>
-                            <option value="Europe/Paris" {{if .User.Timezone.Valid}}{{if eq .User.Timezone.String "Europe/Paris"}}selected{{end}}{{end}}>Europe/Paris (CET/CEST)</option>
-                            <option value="Asia/Tokyo" {{if .User.Timezone.Valid}}{{if eq .User.Timezone.String "Asia/Tokyo"}}selected{{end}}{{end}}>Asia/Tokyo (JST)</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Work Days</label>
-                        <div>
-                            <input type="hidden" id="work_days" name="work_days" value='{{if .User.WorkDays}}{{.User.WorkDays}}{{else}}["Monday","Tuesday","Wednesday","Thursday","Friday"]{{end}}'>
-                            <label><input type="checkbox" class="work-day-checkbox" value="Monday"> Monday</label><br>
-                            <label><input type="checkbox" class="work-day-checkbox" value="Tuesday"> Tuesday</label><br>
-                            <label><input type="checkbox" class="work-day-checkbox" value="Wednesday"> Wednesday</label><br>
-                            <label><input type="checkbox" class="work-day-checkbox" value="Thursday"> Thursday</label><br>
-                            <label><input type="checkbox" class="work-day-checkbox" value="Friday"> Friday</label><br>
-                            <label><input type="checkbox" class="work-day-checkbox" value="Saturday"> Saturday</label><br>
-                            <label><input type="checkbox" class="work-day-checkbox" value="Sunday"> Sunday</label>
-                        </div>
-                    </div>
-                    <button type="submit" class="btn btn-gradient-primary">Save Work Day Settings</button>
-                </form>
-            </div>
+        <div>
+          <label for="slackEmail" class="block text-sm font-medium text-gray-700 mb-1">Slack Email</label>
+          <input type="email" id="slackEmail" name="slack_email" placeholder="Enter Slack Email" value="{{.User.SlackUserID.String}}" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none">
+          <p class="mt-1 text-xs text-gray-500">Used to fetch your Slack ID. Leave empty to use your registered email.</p>
         </div>
+        <button type="submit" class="inline-flex items-center px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">Update Slack ID</button>
+      </form>
     </div>
+  </div>
 
-    <!-- Summary Filter Settings -->
-    <div class="col-md-6 grid-margin stretch-card">
-        <div class="card">
-            <div class="card-body">
-                <h4 class="card-title">Summary Filter Settings</h4>
-                <form method="post" action="/profile/update-summary-filters">
-                    <div class="form-group">
-                        <label>Tag Filter</label>
-                        <div>
-                            <label><input type="radio" name="summary_tag_filter" value="all_tags" {{if or (not .User.SummaryTagFilter) (eq .User.SummaryTagFilter "all_tags")}}checked{{end}}> All Tags</label><br>
-                            <label><input type="radio" name="summary_tag_filter" value="configured_tags" {{if eq .User.SummaryTagFilter "configured_tags"}}checked{{end}}> Only Configured Tags</label>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>Ticket Filter</label>
-                        <div>
-                            <label><input type="radio" name="summary_ticket_filter" value="all_tickets" {{if eq .User.SummaryTicketFilter "all_tickets"}}checked{{end}}> All Updated Tickets</label><br>
-                            <label><input type="radio" name="summary_ticket_filter" value="assigned_tickets" {{if or (not .User.SummaryTicketFilter) (eq .User.SummaryTicketFilter "assigned_tickets")}}checked{{end}}> Only Assigned Tickets</label>
-                        </div>
-                    </div>
-                    <button type="submit" class="btn btn-gradient-primary">Save Filter Settings</button>
-                </form>
-            </div>
-        </div>
+  <!-- Daily Summary Settings -->
+  <div class="bg-white rounded-xl border border-gray-200 shadow-sm">
+    <div class="px-6 py-4 border-b border-gray-100">
+      <h3 class="text-sm font-semibold text-gray-900">Daily Summary Settings</h3>
     </div>
+    <div class="p-6">
+      <form method="post" action="/profile/update-summary-settings" class="space-y-4">
+        {{$.CSRFField}}
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" name="daily_summary" {{if .User.DailySummary}}checked{{end}} class="rounded border-gray-300 text-brand-600 focus:ring-brand-500">
+          <span class="text-sm text-gray-700">Enable Daily Summary</span>
+        </label>
+        <div>
+          <label for="summaryTime" class="block text-sm font-medium text-gray-700 mb-1">Summary Time</label>
+          <input type="time" id="summaryTime" name="summary_time" value="{{if .User.SummaryTime.Valid}}{{.User.SummaryTime.Time.Format "15:04"}}{{else}}09:00{{end}}" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none">
+        </div>
+        <button type="submit" class="inline-flex items-center px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">Save Settings</button>
+      </form>
+      <div class="mt-4 pt-4 border-t border-gray-100">
+        <button id="getSummaryNowBtn" onclick="fetchSummaryNow()" class="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
+          Get Summary Now
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Work Day Settings -->
+  <div class="bg-white rounded-xl border border-gray-200 shadow-sm">
+    <div class="px-6 py-4 border-b border-gray-100">
+      <h3 class="text-sm font-semibold text-gray-900">Work Day Settings</h3>
+    </div>
+    <div class="p-6">
+      <form method="post" action="/profile/update-work-day-settings" class="space-y-4">
+        {{$.CSRFField}}
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label for="work_day_start_time" class="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
+            <input type="time" id="work_day_start_time" name="work_day_start_time" value="{{if .User.WorkDayStartTime.Valid}}{{.User.WorkDayStartTime.Time.Format "15:04"}}{{else}}09:00{{end}}" required class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none">
+          </div>
+          <div>
+            <label for="work_day_end_time" class="block text-sm font-medium text-gray-700 mb-1">End Time</label>
+            <input type="time" id="work_day_end_time" name="work_day_end_time" value="{{if .User.WorkDayEndTime.Valid}}{{.User.WorkDayEndTime.Time.Format "15:04"}}{{else}}17:00{{end}}" required class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none">
+          </div>
+        </div>
+        <div>
+          <label for="timezone" class="block text-sm font-medium text-gray-700 mb-1">Timezone</label>
+          <select id="timezone" name="timezone" required class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none bg-white">
+            <option value="UTC" {{if not .User.Timezone.Valid}}selected{{else}}{{if eq .User.Timezone.String "UTC"}}selected{{end}}{{end}}>UTC</option>
+            <option value="America/New_York" {{if .User.Timezone.Valid}}{{if eq .User.Timezone.String "America/New_York"}}selected{{end}}{{end}}>Eastern (EST/EDT)</option>
+            <option value="America/Chicago" {{if .User.Timezone.Valid}}{{if eq .User.Timezone.String "America/Chicago"}}selected{{end}}{{end}}>Central (CST/CDT)</option>
+            <option value="America/Denver" {{if .User.Timezone.Valid}}{{if eq .User.Timezone.String "America/Denver"}}selected{{end}}{{end}}>Mountain (MST/MDT)</option>
+            <option value="America/Los_Angeles" {{if .User.Timezone.Valid}}{{if eq .User.Timezone.String "America/Los_Angeles"}}selected{{end}}{{end}}>Pacific (PST/PDT)</option>
+            <option value="Europe/London" {{if .User.Timezone.Valid}}{{if eq .User.Timezone.String "Europe/London"}}selected{{end}}{{end}}>London (GMT/BST)</option>
+            <option value="Europe/Paris" {{if .User.Timezone.Valid}}{{if eq .User.Timezone.String "Europe/Paris"}}selected{{end}}{{end}}>Paris (CET/CEST)</option>
+            <option value="Asia/Tokyo" {{if .User.Timezone.Valid}}{{if eq .User.Timezone.String "Asia/Tokyo"}}selected{{end}}{{end}}>Tokyo (JST)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">Work Days</label>
+          <input type="hidden" id="work_days" name="work_days" value='{{if .User.WorkDays}}{{.User.WorkDays}}{{else}}["Monday","Tuesday","Wednesday","Thursday","Friday"]{{end}}'>
+          <div class="flex flex-wrap gap-2">
+            <label class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 cursor-pointer hover:bg-gray-50 text-sm has-[:checked]:bg-blue-50 has-[:checked]:border-blue-300 has-[:checked]:text-blue-700 transition-colors">
+              <input type="checkbox" class="work-day-checkbox sr-only" value="Monday"><span>Mon</span>
+            </label>
+            <label class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 cursor-pointer hover:bg-gray-50 text-sm has-[:checked]:bg-blue-50 has-[:checked]:border-blue-300 has-[:checked]:text-blue-700 transition-colors">
+              <input type="checkbox" class="work-day-checkbox sr-only" value="Tuesday"><span>Tue</span>
+            </label>
+            <label class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 cursor-pointer hover:bg-gray-50 text-sm has-[:checked]:bg-blue-50 has-[:checked]:border-blue-300 has-[:checked]:text-blue-700 transition-colors">
+              <input type="checkbox" class="work-day-checkbox sr-only" value="Wednesday"><span>Wed</span>
+            </label>
+            <label class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 cursor-pointer hover:bg-gray-50 text-sm has-[:checked]:bg-blue-50 has-[:checked]:border-blue-300 has-[:checked]:text-blue-700 transition-colors">
+              <input type="checkbox" class="work-day-checkbox sr-only" value="Thursday"><span>Thu</span>
+            </label>
+            <label class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 cursor-pointer hover:bg-gray-50 text-sm has-[:checked]:bg-blue-50 has-[:checked]:border-blue-300 has-[:checked]:text-blue-700 transition-colors">
+              <input type="checkbox" class="work-day-checkbox sr-only" value="Friday"><span>Fri</span>
+            </label>
+            <label class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 cursor-pointer hover:bg-gray-50 text-sm has-[:checked]:bg-blue-50 has-[:checked]:border-blue-300 has-[:checked]:text-blue-700 transition-colors">
+              <input type="checkbox" class="work-day-checkbox sr-only" value="Saturday"><span>Sat</span>
+            </label>
+            <label class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-200 cursor-pointer hover:bg-gray-50 text-sm has-[:checked]:bg-blue-50 has-[:checked]:border-blue-300 has-[:checked]:text-blue-700 transition-colors">
+              <input type="checkbox" class="work-day-checkbox sr-only" value="Sunday"><span>Sun</span>
+            </label>
+          </div>
+        </div>
+        <button type="submit" class="inline-flex items-center px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">Save Work Day Settings</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Summary Filter Settings -->
+  <div class="bg-white rounded-xl border border-gray-200 shadow-sm">
+    <div class="px-6 py-4 border-b border-gray-100">
+      <h3 class="text-sm font-semibold text-gray-900">Summary Filters</h3>
+    </div>
+    <div class="p-6">
+      <form method="post" action="/profile/update-summary-filters" class="space-y-5">
+        {{$.CSRFField}}
+        <fieldset>
+          <legend class="text-sm font-medium text-gray-700 mb-2">Tag Filter</legend>
+          <div class="space-y-2">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="summary_tag_filter" value="all_tags" {{if or (not .User.SummaryTagFilter) (eq .User.SummaryTagFilter "all_tags")}}checked{{end}} class="text-brand-600 focus:ring-brand-500">
+              <span class="text-sm text-gray-700">All Tags</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="summary_tag_filter" value="configured_tags" {{if eq .User.SummaryTagFilter "configured_tags"}}checked{{end}} class="text-brand-600 focus:ring-brand-500">
+              <span class="text-sm text-gray-700">Only Configured Tags</span>
+            </label>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend class="text-sm font-medium text-gray-700 mb-2">Ticket Filter</legend>
+          <div class="space-y-2">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="summary_ticket_filter" value="all_tickets" {{if eq .User.SummaryTicketFilter "all_tickets"}}checked{{end}} class="text-brand-600 focus:ring-brand-500">
+              <span class="text-sm text-gray-700">All Updated Tickets</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="summary_ticket_filter" value="assigned_tickets" {{if or (not .User.SummaryTicketFilter) (eq .User.SummaryTicketFilter "assigned_tickets")}}checked{{end}} class="text-brand-600 focus:ring-brand-500">
+              <span class="text-sm text-gray-700">Only Assigned Tickets</span>
+            </label>
+          </div>
+        </fieldset>
+        <button type="submit" class="inline-flex items-center px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">Save Filters</button>
+      </form>
+      <div class="mt-4 pt-4 border-t border-gray-100">
+        <a href="/alerts" class="inline-flex items-center gap-2 text-sm text-brand-600 hover:text-brand-700 font-medium transition-colors">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+          Manage your tag alerts
+        </a>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Summary Modal -->
-<div class="modal fade" id="summaryModal" tabindex="-1" role="dialog" aria-labelledby="summaryModalLabel" aria-hidden="true">
-    <div class="modal-dialog" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="summaryModalLabel">Daily Summary</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body" id="summaryModalContent">
-                Loading...
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-            </div>
-        </div>
+<div id="summaryModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50">
+  <div class="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+      <h3 class="text-sm font-semibold text-gray-900">Daily Summary</h3>
+      <button onclick="closeSummaryModal()" class="p-1 rounded-lg hover:bg-gray-100 transition-colors">
+        <svg class="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
     </div>
-</div>
-
-
-<hr>
-
-<!-- Tag Alerts -->
-<div class="row">
-    <div class="col-md-6 grid-margin stretch-card">
-        <div class="card">
-            <div class="card-body">
-                <h4 class="card-title">Add New Tag Alert</h4>
-                <form method="POST" action="/profile/add-tag">
-                    <div class="form-group">
-                        <label for="tag">Tag</label>
-                        <input type="text" name="tag" id="tag" required class="form-control" placeholder="Enter tag">
-                    </div>
-                    <div class="form-group">
-                        <label for="slack_channel">Slack Channel</label>
-                        <select name="slack_channel" id="slack_channel" required class="form-control">
-                            {{range .SlackChannels}}
-                            <option value="{{.ID}}">{{.Name}}</option>
-                            {{end}}
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="alert_type">Alert Type</label>
-                        <select name="alert_type" id="alert_type" required class="form-control">
-                            <option value="new_ticket">New Ticket</option>
-                            <option value="sla_deadline">SLA Deadline (All Types)</option>
-                            <option value="sla_reply">SLA Reply Time</option>
-                            <option value="sla_resolution">SLA Resolution Time</option>
-                            <option value="ticket_update">Ticket Update</option>
-                        </select>
-                    </div>
-                    <button type="submit" class="btn btn-gradient-primary">Add Tag Alert</button>
-                </form>
-            </div>
-        </div>
+    <div id="summaryModalContent" class="p-6 overflow-y-auto text-sm text-gray-700">Loading...</div>
+    <div class="px-6 py-3 border-t border-gray-100 flex justify-end">
+      <button onclick="closeSummaryModal()" class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">Close</button>
     </div>
-
-    <!-- Configured Alerts Table -->
-    <div class="col-md-12 grid-margin stretch-card">
-        <div class="card">
-            <div class="card-body">
-                <h4 class="card-title">Configured Alerts</h4>
-                <div class="table-responsive">
-                    <table class="table table-striped">
-                        <thead>
-                            <tr>
-                                <th>Tag</th>
-                                <th>Slack Channel</th>
-                                <th>Alert Type</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {{range .TagAlerts}}
-                            <tr>
-                                <td>{{.Tag}}</td>
-                                <td>{{.SlackChannelID}}</td>
-                                <td>{{.AlertType}}</td>
-                                <td>
-                                    <form method="POST" action="/profile/delete-tag/{{.ID}}" onsubmit="return confirm('Are you sure you want to delete this alert?');">
-                                        <button type="submit" class="btn btn-gradient-danger">Delete</button>
-                                    </form>
-                                </td>
-                            </tr>
-                            {{else}}
-                            <tr>
-                                <td colspan="4" class="text-center">No alerts configured.</td>
-                            </tr>
-                            {{end}}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
+  </div>
 </div>
 
 <script>
-// Update work_days hidden input when checkboxes change
 document.addEventListener('DOMContentLoaded', function() {
-    const checkboxes = document.querySelectorAll('.work-day-checkbox');
-    const hiddenInput = document.getElementById('work_days');
-    
-    function updateWorkDays() {
-        const selected = Array.from(checkboxes)
-            .filter(cb => cb.checked)
-            .map(cb => cb.value);
-        hiddenInput.value = JSON.stringify(selected);
-    }
-    
-    checkboxes.forEach(cb => {
-        cb.addEventListener('change', updateWorkDays);
-    });
-    
-    // Initialize from existing value if present
-    const existingValue = hiddenInput.value;
-    if (existingValue) {
-        try {
-            const days = JSON.parse(existingValue);
-            checkboxes.forEach(cb => {
-                cb.checked = days.includes(cb.value);
-            });
-        } catch (e) {
-            console.error('Error parsing work days:', e);
-        }
-    }
+  // Work days checkbox logic
+  const checkboxes = document.querySelectorAll('.work-day-checkbox');
+  const hiddenInput = document.getElementById('work_days');
+
+  function updateWorkDays() {
+    const selected = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+    hiddenInput.value = JSON.stringify(selected);
+  }
+
+  checkboxes.forEach(cb => cb.addEventListener('change', updateWorkDays));
+
+  if (hiddenInput && hiddenInput.value) {
+    try {
+      const days = JSON.parse(hiddenInput.value);
+      checkboxes.forEach(cb => { cb.checked = days.includes(cb.value); });
+    } catch (e) {}
+  }
 });
+
+function fetchSummaryNow() {
+  const modal = document.getElementById('summaryModal');
+  const content = document.getElementById('summaryModalContent');
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  content.innerHTML = '<div class="flex items-center gap-2 text-gray-500"><svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Generating summary...</div>';
+
+  fetch("/profile/summary/now", { method: "GET", headers: { "Accept": "application/json" } })
+    .then(r => r.json())
+    .then(data => { content.innerHTML = data.message ? '<pre class="whitespace-pre-wrap font-mono text-xs">' + data.message + '</pre>' : 'Failed to load summary.'; })
+    .catch(() => { content.innerHTML = 'An error occurred while loading the summary.'; });
+}
+
+function closeSummaryModal() {
+  const modal = document.getElementById('summaryModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
 </script>
 {{end}}

@@ -19,19 +19,21 @@ var funcMap = template.FuncMap{
 // DashboardHandler handles requests to the dashboard and injects dependencies via AdminHandler.
 func (h *AppHandler) DashboardHandler(w http.ResponseWriter, r *http.Request, dashboardService *services.DashboardService) {
 
-	// Extract user ID from the context
 	userID, ok := GetUserIDFromContext(r.Context())
 	if !ok || userID == 0 {
 		http.Error(w, "User not found", http.StatusUnauthorized)
 		return
 	}
 
-	// Retrieve alert stats for the user
-	stats, err := dashboardService.GetAlertStatsForUser(userID)
-	if err != nil {
-		log.Println("Error getting alert stats:", err)
-		http.Error(w, "Failed to get alert stats", http.StatusInternalServerError)
-		return
+	var stats []services.AlertStats
+	if dashboardService != nil {
+		var err error
+		stats, err = dashboardService.GetAlertStatsForUser(userID)
+		if err != nil {
+			log.Println("Error getting alert stats:", err)
+			http.Error(w, "Failed to get alert stats", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Process stats for rendering in the dashboard
@@ -66,8 +68,8 @@ func (h *AppHandler) DashboardHandler(w http.ResponseWriter, r *http.Request, da
 	}); err != nil {
 		log.Printf("Error rendering template: %v", err)
 		http.Error(w, "Unable to render template", http.StatusInternalServerError)
+		return
 	}
-
 }
 
 // processAlertStatsForChart transforms the AlertStats data into a Chart.js-compatible format.

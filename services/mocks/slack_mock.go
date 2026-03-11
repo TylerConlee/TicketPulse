@@ -2,6 +2,8 @@
 package mocks
 
 import (
+	"context"
+
 	"github.com/TylerConlee/TicketPulse/services"
 	"github.com/nukosuke/go-zendesk/zendesk"
 	"github.com/stretchr/testify/mock"
@@ -40,6 +42,12 @@ func (m *MockSlackService) SendSlackMessage(channelID, alertType, slaLabel strin
 	return args.Error(0)
 }
 
+// SendSlackMessageWithClient mocks the SendSlackMessageWithClient method.
+func (m *MockSlackService) SendSlackMessageWithClient(channelID, alertType, slaLabel string, ticket zendesk.Ticket, slaInfo *services.SLAInfo, alertTag string, color string, zc *services.ZendeskClient) error {
+	args := m.Called(channelID, alertType, slaLabel, ticket, slaInfo, alertTag, color, zc)
+	return args.Error(0)
+}
+
 // GetUserIDByEmail mocks the GetUserIDByEmail method.
 func (m *MockSlackService) GetUserIDByEmail(email string) (string, error) {
 	args := m.Called(email)
@@ -47,8 +55,8 @@ func (m *MockSlackService) GetUserIDByEmail(email string) (string, error) {
 }
 
 // StartSocketMode mocks the StartSocketMode method.
-func (m *MockSlackService) StartSocketMode() {
-	m.Called()
+func (m *MockSlackService) StartSocketMode(ctx context.Context) {
+	m.Called(ctx)
 }
 
 // Ensure MockSlackService implements SlackServiceInterface.

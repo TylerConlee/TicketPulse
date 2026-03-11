@@ -327,10 +327,12 @@ func createTestZendeskClientWithBaseURL(server *httptest.Server) *ZendeskClient 
 	}
 
 	return &ZendeskClient{
-		httpClient: &http.Client{Transport: transport},
-		Subdomain:  "test",
-		Email:      "test@example.com",
-		APIToken:   "test-token",
+		httpClient:        &http.Client{Transport: transport},
+		Subdomain:         "test",
+		Email:             "test@example.com",
+		APIToken:          "test-token",
+		requesterCache:    make(map[int64]*User),
+		organizationCache: make(map[int64]*Organization),
 	}
 }
 

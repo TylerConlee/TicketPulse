@@ -3,12 +3,16 @@ package models
 import (
 	"database/sql"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"log"
 	"time"
 
 	"github.com/TylerConlee/TicketPulse/db"
 )
+
+// ErrUserNotFound is returned when a user lookup finds no matching record.
+var ErrUserNotFound = errors.New("user not found")
 
 func init() {
 	// Register the Role type with gob
@@ -42,12 +46,13 @@ type User struct {
 }
 
 type TagAlert struct {
-	ID             int
-	UserID         int
-	Tag            string
-	SlackChannelID string
-	AlertType      string
-	User           User // Add User field to associate with the alert
+	ID               int
+	UserID           int
+	Tag              string
+	SlackChannelID   string
+	SlackChannelName string
+	AlertType        string
+	User             User
 }
 
 // CreateUser adds a new user to the database
@@ -62,7 +67,7 @@ func CreateUser(db db.Database, email, name string, role Role, dailySummary bool
 func UpdateUser(db db.Database, user User) error {
 
 	_, err := db.Exec(
-		`UPDATE users SET name = ?, role = ?, daily_summary = ?, WHERE id = ?`,
+		`UPDATE users SET name = ?, role = ?, daily_summary = ? WHERE id = ?`,
 		user.Name, user.Role, user.DailySummary, user.ID,
 	)
 	return err
@@ -78,15 +83,15 @@ func UpdateSlackUserID(db db.Database, email string, slackUserID string) error {
 	return nil
 }
 
-// GetUserByEmail retrieves a user by their email
+// GetUserByEmail retrieves a user by their email.
+// Returns ErrUserNotFound if no user exists with the given email.
 func GetUserByEmail(db db.Database, email string) (User, error) {
 	var user User
 	row := db.QueryRow("SELECT id, email, name, role, daily_summary, slack_user_id FROM users WHERE LOWER(email) = LOWER(?)", email)
 	err := row.Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.DailySummary, &user.SlackUserID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// Return a special error to indicate that the user was not found
-			return user, nil
+			return user, ErrUserNotFound
 		}
 		return user, err
 	}
@@ -148,9 +153,29 @@ func GetUserByID(db db.Database, id int) (User, error) {
 	return user, err
 }
 
-// GetAllUsers retrieves all users from the database
+// GetAllUsers retrieves all users from the database.
 func GetAllUsers(db db.Database) ([]User, error) {
 	rows, err := db.Query("SELECT id, email, name, role, daily_summary FROM users")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var user User
+		err = rows.Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.DailySummary)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, nil
+}
+
+// GetAllUsersPaginated retrieves users with LIMIT and OFFSET for pagination.
+func GetAllUsersPaginated(db db.Database, limit, offset int) ([]User, error) {
+	rows, err := db.Query("SELECT id, email, name, role, daily_summary FROM users ORDER BY id LIMIT ? OFFSET ?", limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -205,15 +230,15 @@ func GetUserCount(db db.Database) (int, error) {
 }
 
 // CreateTagAlert adds a new tag alert configuration for a user
-func CreateTagAlert(db db.Database, userID int, tag, slackChannelID, alertType string) error {
-	_, err := db.Exec(`INSERT INTO user_tag_alerts (user_id, tag, slack_channel_id, alert_type) VALUES (?, ?, ?, ?)`,
-		userID, tag, slackChannelID, alertType)
+func CreateTagAlert(db db.Database, userID int, tag, slackChannelID, slackChannelName, alertType string) error {
+	_, err := db.Exec(`INSERT INTO user_tag_alerts (user_id, tag, slack_channel_id, slack_channel_name, alert_type) VALUES (?, ?, ?, ?, ?)`,
+		userID, tag, slackChannelID, slackChannelName, alertType)
 	return err
 }
 
 // GetTagAlertsByUser retrieves all tag alerts for a specific user
 func GetTagAlertsByUser(db db.Database, userID int) ([]TagAlert, error) {
-	rows, err := db.Query(`SELECT id, user_id, tag, slack_channel_id, alert_type FROM user_tag_alerts WHERE user_id = ?`, userID)
+	rows, err := db.Query(`SELECT id, user_id, tag, slack_channel_id, slack_channel_name, alert_type FROM user_tag_alerts WHERE user_id = ?`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +247,7 @@ func GetTagAlertsByUser(db db.Database, userID int) ([]TagAlert, error) {
 	var alerts []TagAlert
 	for rows.Next() {
 		var alert TagAlert
-		err = rows.Scan(&alert.ID, &alert.UserID, &alert.Tag, &alert.SlackChannelID, &alert.AlertType)
+		err = rows.Scan(&alert.ID, &alert.UserID, &alert.Tag, &alert.SlackChannelID, &alert.SlackChannelName, &alert.AlertType)
 		if err != nil {
 			return nil, err
 		}
@@ -231,15 +256,28 @@ func GetTagAlertsByUser(db db.Database, userID int) ([]TagAlert, error) {
 	return alerts, nil
 }
 
+// GetTagAlertByID retrieves a single tag alert by its ID.
+func GetTagAlertByID(db db.Database, alertID int) (TagAlert, error) {
+	var alert TagAlert
+	err := db.QueryRow(`SELECT id, user_id, tag, slack_channel_id, slack_channel_name, alert_type FROM user_tag_alerts WHERE id = ?`, alertID).
+		Scan(&alert.ID, &alert.UserID, &alert.Tag, &alert.SlackChannelID, &alert.SlackChannelName, &alert.AlertType)
+	return alert, err
+}
+
 // DeleteTagAlert removes a specific tag alert configuration
 func DeleteTagAlert(db db.Database, alertID int) error {
 	_, err := db.Exec(`DELETE FROM user_tag_alerts WHERE id = ?`, alertID)
 	return err
 }
+
+// ValidRole checks if a role string is one of the allowed values.
+func ValidRole(r Role) bool {
+	return r == AdminRole || r == AgentRole
+}
 func GetAllTagAlerts(db db.Database) ([]TagAlert, error) {
 	rows, err := db.Query(`
 		SELECT 
-			uta.id, uta.tag, uta.slack_channel_id, uta.alert_type, 
+			uta.id, uta.tag, uta.slack_channel_id, uta.slack_channel_name, uta.alert_type, 
 			u.id, u.name, u.email 
 		FROM 
 			user_tag_alerts uta 
@@ -255,11 +293,43 @@ func GetAllTagAlerts(db db.Database) ([]TagAlert, error) {
 	for rows.Next() {
 		var alert TagAlert
 		var user User
-		err = rows.Scan(&alert.ID, &alert.Tag, &alert.SlackChannelID, &alert.AlertType, &user.ID, &user.Name, &user.Email)
+		err = rows.Scan(&alert.ID, &alert.Tag, &alert.SlackChannelID, &alert.SlackChannelName, &alert.AlertType, &user.ID, &user.Name, &user.Email)
 		if err != nil {
 			return nil, err
 		}
-		alert.User = user // Now this assignment works
+		alert.User = user
+		alerts = append(alerts, alert)
+	}
+	return alerts, nil
+}
+
+// GetAllTagAlertsPaginated retrieves tag alerts with LIMIT and OFFSET for pagination.
+func GetAllTagAlertsPaginated(db db.Database, limit, offset int) ([]TagAlert, error) {
+	rows, err := db.Query(`
+		SELECT 
+			uta.id, uta.tag, uta.slack_channel_id, uta.slack_channel_name, uta.alert_type, 
+			u.id, u.name, u.email 
+		FROM 
+			user_tag_alerts uta 
+		INNER JOIN 
+			users u ON uta.user_id = u.id
+		ORDER BY uta.id
+		LIMIT ? OFFSET ?
+	`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var alerts []TagAlert
+	for rows.Next() {
+		var alert TagAlert
+		var user User
+		err = rows.Scan(&alert.ID, &alert.Tag, &alert.SlackChannelID, &alert.SlackChannelName, &alert.AlertType, &user.ID, &user.Name, &user.Email)
+		if err != nil {
+			return nil, err
+		}
+		alert.User = user
 		alerts = append(alerts, alert)
 	}
 	return alerts, nil

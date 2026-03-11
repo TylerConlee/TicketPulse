@@ -1,14 +1,18 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/TylerConlee/TicketPulse/db"
+	"github.com/TylerConlee/TicketPulse/logging"
 	"github.com/TylerConlee/TicketPulse/middlewares"
 	"github.com/TylerConlee/TicketPulse/models"
 	"github.com/nukosuke/go-zendesk/zendesk"
@@ -17,12 +21,13 @@ import (
 )
 
 type SlackService struct {
-	client     *slack.Client
-	socketMode *socketmode.Client
-	ready      bool
-	sseServer  *middlewares.SSEServer
-	DB         db.Database
-	channels   []slack.Channel // Moved from global var allChannels
+	client        *slack.Client
+	socketMode    *socketmode.Client
+	ready         bool
+	sseServer     *middlewares.SSEServer
+	DB            db.Database
+	channels      []slack.Channel
+	ZendeskClient *ZendeskClient
 }
 
 // SlackMessage represents a Slack Block Kit message payload.
@@ -67,13 +72,14 @@ func NewSlackService(db db.Database, sseServer *middlewares.SSEServer) (*SlackSe
 		return nil, fmt.Errorf("slack app token not configured")
 	}
 
+	slackDebug := os.Getenv("SLACK_DEBUG") == "true"
 	client := slack.New(
 		botToken,
-		slack.OptionDebug(true),
+		slack.OptionDebug(slackDebug),
 		slack.OptionAppLevelToken(appToken),
 	)
 	broadcastStatusUpdates(sseServer, "slack", "connected", "")
-	socketMode := socketmode.New(client)
+	socketMode := socketmode.New(client, socketmode.OptionDebug(slackDebug))
 
 	params := &slack.GetConversationsParameters{
 		ExcludeArchived: true,
@@ -138,77 +144,159 @@ func (s *SlackService) SendAlert(channelID, message string) error {
 	return nil
 }
 
-func (s *SlackService) StartSocketMode() {
-
+func (s *SlackService) StartSocketMode(ctx context.Context) {
 	go func() {
-
-		for evt := range s.socketMode.Events {
-
-			switch evt.Type {
-			case socketmode.EventTypeInteractive:
-				callback, ok := evt.Data.(slack.InteractionCallback)
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("PANIC in socket mode event handler: %v", r)
+			}
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("Slack socket mode event handler stopped (context cancelled)")
+				return
+			case evt, ok := <-s.socketMode.Events:
 				if !ok {
-					continue
+					return
 				}
-
-				if callback.Type == slack.InteractionTypeBlockActions {
-					action := callback.ActionCallback.BlockActions[0]
-					if action.ActionID == "acknowledge" {
-						s.HandleAcknowledge(callback)
+				log.Printf("Socket mode event: type=%s dataType=%T", evt.Type, evt.Data)
+				switch evt.Type {
+				case socketmode.EventTypeInteractive:
+					log.Printf("Socket mode: received interactive event")
+					callback, ok := evt.Data.(slack.InteractionCallback)
+					if !ok {
+						log.Printf("Socket mode: interactive event data is not InteractionCallback, acking anyway")
+						s.socketMode.Ack(*evt.Request)
+						continue
 					}
-				}
+					log.Printf("Socket mode: acknowledging request %s", evt.Request.EnvelopeID)
+					s.socketMode.Ack(*evt.Request)
 
-				s.socketMode.Ack(*evt.Request)
+					if callback.Type == slack.InteractionTypeBlockActions {
+						if len(callback.ActionCallback.BlockActions) > 0 {
+							action := callback.ActionCallback.BlockActions[0]
+							log.Printf("Socket mode: block action received: actionID=%s value=%s", action.ActionID, action.Value)
+							if action.ActionID == "acknowledge" {
+								go s.HandleAcknowledge(callback)
+							}
+						}
+					}
+				default:
+					log.Printf("Socket mode: received event type: %s", evt.Type)
+				}
 			}
 		}
 	}()
-	s.socketMode.Run()
 
+	go func() {
+		<-ctx.Done()
+		log.Println("Shutting down Slack socket mode...")
+	}()
+
+	log.Printf("Socket mode: calling Run() - will block until disconnected")
+	if err := s.socketMode.RunContext(ctx); err != nil {
+		log.Printf("Socket mode: RunContext exited with error: %v", err)
+	} else {
+		log.Printf("Socket mode: RunContext exited cleanly")
+	}
 }
 
 func (s *SlackService) HandleAcknowledge(callback slack.InteractionCallback) {
-	// Create a new footer block with the acknowledgment text
-	acknowledgmentBlock := slack.NewContextBlock(
-		"acknowledged-footer",
-		slack.NewTextBlockObject("mrkdwn", fmt.Sprintf("Ticket acknowledged by <@%s> at %s", callback.User.ID, time.Now().Format(time.RFC1123)), false, false),
-	)
+	now := time.Now()
+	slackUserID := callback.User.ID
 
-	// Initialize a new slice to store the blocks
+	// Parse the ticket ID from the button value (format: "acknowledge_{ticketID}")
+	var ticketID int64
+	if len(callback.ActionCallback.BlockActions) > 0 {
+		value := callback.ActionCallback.BlockActions[0].Value
+		if parts := strings.SplitN(value, "_", 2); len(parts) == 2 {
+			if id, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+				ticketID = id
+			}
+		}
+	}
+
+	// Build the updated Slack message: keep all blocks except the action block
 	var newBlocks []slack.Block
-
-	// Iterate over the existing blocks to keep all non-action blocks
 	for _, block := range callback.Message.Blocks.BlockSet {
-		// Keep everything except the action block
 		if _, ok := block.(*slack.ActionBlock); !ok {
 			newBlocks = append(newBlocks, block)
 		}
 	}
 
-	// Append the new acknowledgment block
-	newBlocks = append(newBlocks, acknowledgmentBlock)
+	ackText := fmt.Sprintf("Ticket acknowledged by <@%s> at %s", slackUserID, now.Format(time.RFC1123))
+	newBlocks = append(newBlocks, slack.NewContextBlock("acknowledged-footer",
+		slack.NewTextBlockObject("mrkdwn", ackText, false, false),
+	))
 
-	// Update the message with the modified blocks
+	// Attempt Zendesk operations if we have the required dependencies
+	var zendeskErrors []string
+	if ticketID > 0 && s.ZendeskClient != nil {
+		userInfo, err := s.GetSlackUserInfo(slackUserID)
+		if err != nil {
+			log.Printf("HandleAcknowledge: failed to look up Slack user %s: %v", slackUserID, err)
+			zendeskErrors = append(zendeskErrors, "could not resolve Slack user email")
+		} else {
+			// Look up the Zendesk user by email to get their Zendesk user ID
+			zdUser, err := s.ZendeskClient.GetUserByEmail(userInfo.Email)
+			if err != nil {
+				log.Printf("HandleAcknowledge: failed to find Zendesk user for %s: %v", userInfo.Email, err)
+				zendeskErrors = append(zendeskErrors, "Zendesk user not found")
+			} else {
+				if err := s.ZendeskClient.AssignTicket(ticketID, zdUser.ID); err != nil {
+					log.Printf("HandleAcknowledge: failed to assign ticket %d: %v", ticketID, err)
+					zendeskErrors = append(zendeskErrors, "ticket assignment failed")
+				}
+			}
+
+			// Look up alert type from the database for the internal note
+			alertType := "alert"
+			if alertLog, err := models.GetMostRecentAlertLogByTicketID(s.DB, ticketID); err == nil {
+				alertType = alertLog.AlertType
+			}
+
+			noteBody := fmt.Sprintf("%s has acknowledged a TicketPulse alert for %s at %s",
+				userInfo.RealName, alertType, now.Format(time.RFC1123))
+			if err := s.ZendeskClient.AddInternalNote(ticketID, noteBody); err != nil {
+				log.Printf("HandleAcknowledge: failed to add internal note to ticket %d: %v", ticketID, err)
+				zendeskErrors = append(zendeskErrors, "internal note failed")
+			}
+		}
+	}
+
+	// If any Zendesk operations failed, add a warning block
+	if len(zendeskErrors) > 0 {
+		warningText := fmt.Sprintf(":warning: Zendesk update incomplete: %s", strings.Join(zendeskErrors, ", "))
+		newBlocks = append(newBlocks, slack.NewContextBlock("zendesk-warning",
+			slack.NewTextBlockObject("mrkdwn", warningText, false, false),
+		))
+	}
+
 	_, _, _, err := s.client.UpdateMessage(callback.Channel.ID, callback.Message.Timestamp, slack.MsgOptionBlocks(newBlocks...))
 	if err != nil {
 		log.Printf("Failed to update message in channel %s at %s: %v", callback.Channel.ID, callback.Message.Timestamp, err)
 	}
 }
 
+// SendSlackMessage creates a temporary ZendeskClient for backward compatibility.
+// Prefer SendSlackMessageWithClient when a ZendeskClient is already available.
 func (s *SlackService) SendSlackMessage(channelID, alertType, slaLabel string, ticket zendesk.Ticket, slaInfo *SLAInfo, alertTag string, color string) error {
-	// Fetch Zendesk subdomain for ticket URL
-	zendeskSubdomain, err := models.GetConfiguration(s.DB, "zendesk_subdomain")
-	if err != nil || zendeskSubdomain == "" {
-		return fmt.Errorf("failed to retrieve Zendesk subdomain")
-	}
-	ticketURL := fmt.Sprintf("https://%s.zendesk.com/agent/tickets/%d", zendeskSubdomain, ticket.ID)
-
-	// Create a new Zendesk client
 	zc, err := NewZendeskClient(s.DB)
 	if err != nil {
 		return fmt.Errorf("failed to create Zendesk client: %v", err)
 	}
+	return s.SendSlackMessageWithClient(channelID, alertType, slaLabel, ticket, slaInfo, alertTag, color, zc)
+}
 
-	// Get requester information
+// SendSlackMessageWithClient sends a Slack alert, reusing the provided ZendeskClient
+// for requester/organization lookups (which benefit from the client's built-in cache).
+func (s *SlackService) SendSlackMessageWithClient(channelID, alertType, slaLabel string, ticket zendesk.Ticket, slaInfo *SLAInfo, alertTag string, color string, zc *ZendeskClient) error {
+	logging.Debug(logging.AreaSlack, "SendSlackMessage: channelID=%s alertType=%s slaLabel=%q ticketID=%d tag=%s color=%s",
+		channelID, alertType, slaLabel, ticket.ID, alertTag, color)
+
+	ticketURL := fmt.Sprintf("https://%s.zendesk.com/agent/tickets/%d", zc.Subdomain, ticket.ID)
+
 	requesterName := "Unknown Requester"
 	requester, err := zc.GetRequesterByID(ticket.RequesterID)
 	if err != nil {
@@ -217,7 +305,6 @@ func (s *SlackService) SendSlackMessage(channelID, alertType, slaLabel string, t
 		requesterName = requester.Name
 	}
 
-	// Get organization information
 	organizationName := "Unknown Organization"
 	if ticket.OrganizationID > 0 {
 		org, err := zc.GetOrganizationByID(ticket.OrganizationID)
@@ -327,12 +414,15 @@ func (s *SlackService) SendSlackMessage(channelID, alertType, slaLabel string, t
 	blocks = append(blocks, slack.NewActionBlock("", slack.NewButtonBlockElement("acknowledge", fmt.Sprintf("acknowledge_%d", ticket.ID), slack.NewTextBlockObject("plain_text", "Acknowledge", false, false)).WithStyle(slack.StylePrimary)))
 
 	// Create and send the message using the Slack client
+	logging.Debug(logging.AreaSlack, "SendSlackMessage: posting to channel=%s with %d blocks", channelID, len(blocks))
 	channelID, timestamp, err := s.client.PostMessage(channelID, slack.MsgOptionBlocks(blocks...))
 	if err != nil {
+		logging.Debug(logging.AreaSlack, "SendSlackMessage: FAILED - Slack API error: %v", err)
 		return fmt.Errorf("failed to send Slack message: %v", err)
 	}
 
 	log.Printf("Message successfully sent to channel %s at %s", channelID, timestamp)
+	logging.Debug(logging.AreaSlack, "SendSlackMessage: SUCCESS - channel=%s timestamp=%s", channelID, timestamp)
 	return nil
 }
 
@@ -347,6 +437,29 @@ func (s *SlackService) GetUserIDByEmail(email string) (string, error) {
 	}
 
 	return user.ID, nil
+}
+
+// SlackUserInfo holds resolved Slack user details needed for acknowledge flows.
+type SlackUserInfo struct {
+	Email    string
+	RealName string
+}
+
+// GetSlackUserInfo retrieves a Slack user's email and real name by their Slack user ID.
+func (s *SlackService) GetSlackUserInfo(slackUserID string) (*SlackUserInfo, error) {
+	user, err := s.client.GetUserInfo(slackUserID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Slack user info for %s: %w", slackUserID, err)
+	}
+	email := user.Profile.Email
+	if email == "" {
+		return nil, fmt.Errorf("no email found for Slack user %s", slackUserID)
+	}
+	realName := user.RealName
+	if realName == "" {
+		realName = user.Name
+	}
+	return &SlackUserInfo{Email: email, RealName: realName}, nil
 }
 
 func broadcastStatusUpdates(sseServer *middlewares.SSEServer, service, status, errorMsg string) {

@@ -11,12 +11,14 @@ RUN go mod download
 COPY . .
 
 # Ensure the binary is statically compiled for Alpine by disabling CGO,
-# and reduce binary size with linker flags. Also, explicitly build the package in the current directory.
+# and reduce binary size with linker flags.
 ENV CGO_ENABLED=0
 RUN go build -ldflags="-s -w" -o ticketpulse .
 
 # Final Stage
 FROM alpine:3.18
+
+RUN apk add --no-cache ca-certificates wget
 
 # Create a non-root user for security
 RUN adduser -D appuser
@@ -25,8 +27,15 @@ WORKDIR /home/appuser
 # Copy the statically built binary from the builder stage
 COPY --from=builder /app/ticketpulse .
 
+# Copy templates and static assets required at runtime
+COPY --from=builder /app/templates ./templates
+COPY --from=builder /app/static ./static
+
 # Expose the application port
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/healthz || exit 1
 
 # Switch to the non-root user
 USER appuser

@@ -18,6 +18,8 @@ type ZendeskClientInterface interface {
 	GetOrganizationByID(organizationID int64) (*Organization, error)
 	GetLastPublicCommentTime(ticketID int64) (time.Time, bool, error)
 	GenerateDailySummary(userEmail string, slackService *SlackService, workDayStart, workDayEnd time.Time, timezone string, tagFilterMode, ticketFilterMode string, userTags []string) (string, error)
+	AssignTicket(ticketID int64, assigneeID int64) error
+	AddInternalNote(ticketID int64, body string) error
 }
 
 // SlackServiceInterface defines the interface for Slack operations
@@ -26,8 +28,9 @@ type SlackServiceInterface interface {
 	GetConversations() ([]interface{}, error) // Using interface{} to avoid importing slack types in interface
 	SendAlert(channelID, message string) error
 	SendSlackMessage(channelID, alertType, slaLabel string, ticket zendesk.Ticket, slaInfo *SLAInfo, alertTag string, color string) error
+	SendSlackMessageWithClient(channelID, alertType, slaLabel string, ticket zendesk.Ticket, slaInfo *SLAInfo, alertTag string, color string, zc *ZendeskClient) error
 	GetUserIDByEmail(email string) (string, error)
-	StartSocketMode()
+	StartSocketMode(ctx context.Context)
 }
 
 // SchedulerServiceInterface defines the interface for scheduler operations

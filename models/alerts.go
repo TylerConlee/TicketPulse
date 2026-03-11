@@ -3,9 +3,11 @@ package models
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/TylerConlee/TicketPulse/db"
+	"github.com/TylerConlee/TicketPulse/logging"
 )
 
 type SLAAlertCache struct {
@@ -21,47 +23,64 @@ type SLAAlertCache struct {
 
 // CreateSLAAlertCache inserts a new entry into the sla_alert_cache table.
 func CreateSLAAlertCache(ctx context.Context, db db.Database, cacheEntry SLAAlertCache) error {
+	logging.Debug(logging.AreaCache, "CreateSLAAlertCache: inserting user=%d ticket=%d alertType=%s metricType=%s label=%q breach_at=%s",
+		cacheEntry.UserID, cacheEntry.TicketID, cacheEntry.AlertType, cacheEntry.MetricType, cacheEntry.Label, cacheEntry.BreachAt.Format(time.RFC3339))
+
 	query := `
         INSERT INTO sla_alert_cache (user_id, ticket_id, alert_type, metric_type, breach_at, label)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        VALUES (?, ?, ?, ?, ?, ?)
         RETURNING id
     `
 	err := db.QueryRowContext(ctx, query, cacheEntry.UserID, cacheEntry.TicketID, cacheEntry.AlertType, cacheEntry.MetricType, cacheEntry.BreachAt, cacheEntry.Label).Scan(&cacheEntry.ID)
 	if err != nil {
+		logging.Debug(logging.AreaCache, "CreateSLAAlertCache: FAILED - %v", err)
 		return fmt.Errorf("failed to create SLA alert cache entry: %w", err)
 	}
 
+	logging.Debug(logging.AreaCache, "CreateSLAAlertCache: SUCCESS - id=%d", cacheEntry.ID)
 	return nil
 }
 
 // GetSLAAlertCache retrieves an SLA alert cache entry by user, ticket, alert type, and metric type.
 func GetSLAAlertCache(ctx context.Context, db db.Database, userID, ticketID int, alertType, metricType string) (*SLAAlertCache, error) {
+	logging.Debug(logging.AreaCache, "GetSLAAlertCache: looking up user=%d ticket=%d alertType=%s metricType=%s", userID, ticketID, alertType, metricType)
+
 	var cacheEntry SLAAlertCache
-	query := `SELECT id, user_id, ticket_id, alert_type, metric_type, breach_at, created_at, label FROM sla_alert_cache WHERE user_id = $1 AND ticket_id = $2 AND alert_type = $3 AND metric_type = $4`
+	query := `SELECT id, user_id, ticket_id, alert_type, metric_type, breach_at, created_at, label FROM sla_alert_cache WHERE user_id = ? AND ticket_id = ? AND alert_type = ? AND metric_type = ?`
 	err := db.QueryRowContext(ctx, query, userID, ticketID, alertType, metricType).Scan(&cacheEntry.ID, &cacheEntry.UserID, &cacheEntry.TicketID, &cacheEntry.AlertType, &cacheEntry.MetricType, &cacheEntry.BreachAt, &cacheEntry.CreatedAt, &cacheEntry.Label)
 	if err != nil {
+		logging.Debug(logging.AreaCache, "GetSLAAlertCache: no entry found (err=%v)", err)
 		return nil, err
 	}
+
+	logging.Debug(logging.AreaCache, "GetSLAAlertCache: FOUND id=%d label=%q created_at=%s",
+		cacheEntry.ID, cacheEntry.Label, cacheEntry.CreatedAt.Format(time.RFC3339))
 	return &cacheEntry, nil
 }
 
 // ClearSLAAlertCache deletes an SLA alert cache entry by its ID.
 func ClearSLAAlertCache(ctx context.Context, db db.Database, cacheID int64) error {
-	query := `DELETE FROM sla_alert_cache WHERE id = $1`
+	logging.Debug(logging.AreaCache, "ClearSLAAlertCache: deleting cache entry id=%d", cacheID)
+	query := `DELETE FROM sla_alert_cache WHERE id = ?`
 	_, err := db.ExecContext(ctx, query, cacheID)
 	if err != nil {
+		logging.Debug(logging.AreaCache, "ClearSLAAlertCache: FAILED - %v", err)
 		return fmt.Errorf("failed to clear SLA alert cache entry: %w", err)
 	}
+	logging.Debug(logging.AreaCache, "ClearSLAAlertCache: SUCCESS - deleted id=%d", cacheID)
 	return nil
 }
 
 // ClearSLAAlertCacheByTicket clears all cache entries for a specific ticket (useful when SLA is resolved)
 func ClearSLAAlertCacheByTicket(ctx context.Context, db db.Database, ticketID int64) error {
-	query := `DELETE FROM sla_alert_cache WHERE ticket_id = $1`
+	logging.Debug(logging.AreaCache, "ClearSLAAlertCacheByTicket: clearing all entries for ticket=%d", ticketID)
+	query := `DELETE FROM sla_alert_cache WHERE ticket_id = ?`
 	_, err := db.ExecContext(ctx, query, ticketID)
 	if err != nil {
+		logging.Debug(logging.AreaCache, "ClearSLAAlertCacheByTicket: FAILED - %v", err)
 		return fmt.Errorf("failed to clear SLA alert cache entries for ticket: %w", err)
 	}
+	logging.Debug(logging.AreaCache, "ClearSLAAlertCacheByTicket: SUCCESS")
 	return nil
 }
 
@@ -77,7 +96,7 @@ type DailySummaryLog struct {
 func CreateDailySummaryLog(ctx context.Context, db db.Database, userID int, summaryDate time.Time) error {
 	query := `
 		INSERT INTO daily_summary_log (user_id, summary_date)
-		VALUES ($1, $2)
+		VALUES (?, ?)
 		RETURNING id
 	`
 	var id int64
@@ -91,7 +110,7 @@ func CreateDailySummaryLog(ctx context.Context, db db.Database, userID int, summ
 // GetDailySummaryLog retrieves a daily summary log entry for a user and date
 func GetDailySummaryLog(ctx context.Context, db db.Database, userID int, summaryDate time.Time) (*DailySummaryLog, error) {
 	var logEntry DailySummaryLog
-	query := `SELECT id, user_id, summary_date, created_at FROM daily_summary_log WHERE user_id = $1 AND summary_date = $2`
+	query := `SELECT id, user_id, summary_date, created_at FROM daily_summary_log WHERE user_id = ? AND summary_date = ?`
 	err := db.QueryRowContext(ctx, query, userID, summaryDate.Format("2006-01-02")).Scan(&logEntry.ID, &logEntry.UserID, &logEntry.SummaryDate, &logEntry.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -102,11 +121,15 @@ func GetDailySummaryLog(ctx context.Context, db db.Database, userID int, summary
 // ClearExpiredSLAAlertCache clears SLA alert cache entries that are old (created more than 24 hours ago).
 // This keeps recent breached SLA entries to prevent duplicate alerts, while cleaning up stale data.
 func ClearExpiredSLAAlertCache(ctx context.Context, db db.Database) error {
-	// Only clear entries older than 24 hours to prevent duplicate alerts for breached SLAs
+	logging.Debug(logging.AreaCache, "ClearExpiredSLAAlertCache: clearing entries older than 24 hours")
 	query := `DELETE FROM sla_alert_cache WHERE created_at < datetime('now', '-24 hours')`
-	_, err := db.ExecContext(ctx, query)
+	result, err := db.ExecContext(ctx, query)
 	if err != nil {
+		logging.Debug(logging.AreaCache, "ClearExpiredSLAAlertCache: FAILED - %v", err)
 		return fmt.Errorf("failed to clear expired SLA alert cache entries: %w", err)
+	}
+	if rowsAffected, raErr := result.RowsAffected(); raErr == nil {
+		logging.Debug(logging.AreaCache, "ClearExpiredSLAAlertCache: deleted %d expired entries", rowsAffected)
 	}
 	return nil
 }
@@ -122,14 +145,184 @@ type AlertLog struct {
 
 // CreateAlertLog inserts a new alert log entry into the database.
 func CreateAlertLog(ctx context.Context, db db.Database, logEntry AlertLog) error {
+	logging.Debug(logging.AreaDB, "CreateAlertLog: user=%d ticket=%d tag=%s alertType=%s",
+		logEntry.UserID, logEntry.TicketID, logEntry.Tag, logEntry.AlertType)
 	query := `
 		INSERT INTO alert_logs (user_id, ticket_id, tag, alert_type, timestamp)
-		VALUES ($1, $2, $3, $4, $5)
+		VALUES (?, ?, ?, ?, ?)
 		RETURNING id
 	`
 	err := db.QueryRowContext(ctx, query, logEntry.UserID, logEntry.TicketID, logEntry.Tag, logEntry.AlertType, logEntry.Timestamp).Scan(&logEntry.ID)
 	if err != nil {
+		logging.Debug(logging.AreaDB, "CreateAlertLog: FAILED - %v", err)
 		return fmt.Errorf("failed to create alert log: %w", err)
 	}
+	logging.Debug(logging.AreaDB, "CreateAlertLog: SUCCESS - id=%d", logEntry.ID)
 	return nil
+}
+
+// GetMostRecentAlertLogByTicketID returns the most recent alert log entry for a given ticket.
+func GetMostRecentAlertLogByTicketID(database db.Database, ticketID int64) (*AlertLog, error) {
+	var l AlertLog
+	query := `SELECT id, user_id, ticket_id, tag, alert_type, timestamp FROM alert_logs WHERE ticket_id = ? ORDER BY timestamp DESC LIMIT 1`
+	err := database.QueryRow(query, ticketID).Scan(&l.ID, &l.UserID, &l.TicketID, &l.Tag, &l.AlertType, &l.Timestamp)
+	if err != nil {
+		return nil, err
+	}
+	return &l, nil
+}
+
+// ClearAndReplaceCachedTags deletes all cached tags and inserts the new set atomically.
+func ClearAndReplaceCachedTags(db db.Database, tags []string) error {
+	tx, err := db.GetDB().Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("DELETE FROM zendesk_tag_cache"); err != nil {
+		return fmt.Errorf("failed to clear tag cache: %w", err)
+	}
+
+	if len(tags) > 0 {
+		valueStrings := make([]string, len(tags))
+		valueArgs := make([]interface{}, len(tags))
+		for i, tag := range tags {
+			valueStrings[i] = "(?)"
+			valueArgs[i] = tag
+		}
+		query := "INSERT INTO zendesk_tag_cache (tag) VALUES " + strings.Join(valueStrings, ",")
+		if _, err := tx.Exec(query, valueArgs...); err != nil {
+			return fmt.Errorf("failed to insert cached tags: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetCachedTags returns all cached Zendesk tags, ordered alphabetically.
+func GetCachedTags(db db.Database) ([]string, error) {
+	rows, err := db.Query("SELECT tag FROM zendesk_tag_cache ORDER BY tag")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query cached tags: %w", err)
+	}
+	defer rows.Close()
+
+	var tags []string
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			return nil, err
+		}
+		tags = append(tags, tag)
+	}
+	return tags, nil
+}
+
+// UpdateTagAlert updates an existing tag alert's fields.
+func UpdateTagAlert(db db.Database, alertID int, tag, slackChannelID, slackChannelName, alertType string) error {
+	_, err := db.Exec(
+		"UPDATE user_tag_alerts SET tag = ?, slack_channel_id = ?, slack_channel_name = ?, alert_type = ? WHERE id = ?",
+		tag, slackChannelID, slackChannelName, alertType, alertID,
+	)
+	return err
+}
+
+// DeleteTagAlertsByIDs deletes multiple tag alerts by their IDs, scoped to a user.
+func DeleteTagAlertsByIDs(db db.Database, userID int, ids []int) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, 0, len(ids)+1)
+	args = append(args, userID)
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	query := "DELETE FROM user_tag_alerts WHERE user_id = ? AND id IN (" + strings.Join(placeholders, ",") + ")"
+	_, err := db.Exec(query, args...)
+	return err
+}
+
+// GetTagAlertCountByUser returns the number of tag alerts for a user.
+func GetTagAlertCountByUser(db db.Database, userID int) (int, error) {
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM user_tag_alerts WHERE user_id = ?", userID).Scan(&count)
+	return count, err
+}
+
+// AlertHistoryStats holds aggregate statistics for alert history.
+type AlertHistoryStats struct {
+	TotalAlerts  int
+	AlertsToday  int
+	TopTags      []TagCount
+	TopTypes     []TypeCount
+}
+
+type TagCount struct {
+	Tag   string
+	Count int
+}
+
+type TypeCount struct {
+	AlertType string
+	Count     int
+}
+
+// GetAlertHistoryStats returns aggregate statistics for a user's alert history.
+func GetAlertHistoryStats(db db.Database, userID int) (AlertHistoryStats, error) {
+	var stats AlertHistoryStats
+
+	db.QueryRow("SELECT COUNT(*) FROM alert_logs WHERE user_id = ?", userID).Scan(&stats.TotalAlerts)
+
+	today := time.Now().Format("2006-01-02")
+	db.QueryRow("SELECT COUNT(*) FROM alert_logs WHERE user_id = ? AND timestamp LIKE ?", userID, today+"%").Scan(&stats.AlertsToday)
+
+	tagRows, err := db.Query("SELECT tag, COUNT(*) as cnt FROM alert_logs WHERE user_id = ? GROUP BY tag ORDER BY cnt DESC LIMIT 5", userID)
+	if err == nil {
+		defer tagRows.Close()
+		for tagRows.Next() {
+			var tc TagCount
+			tagRows.Scan(&tc.Tag, &tc.Count)
+			stats.TopTags = append(stats.TopTags, tc)
+		}
+	}
+
+	typeRows, err := db.Query("SELECT alert_type, COUNT(*) as cnt FROM alert_logs WHERE user_id = ? GROUP BY alert_type ORDER BY cnt DESC LIMIT 5", userID)
+	if err == nil {
+		defer typeRows.Close()
+		for typeRows.Next() {
+			var tc TypeCount
+			typeRows.Scan(&tc.AlertType, &tc.Count)
+			stats.TopTypes = append(stats.TopTypes, tc)
+		}
+	}
+
+	return stats, nil
+}
+
+// GetAlertHistoryPaginated returns paginated alert log entries for a user.
+func GetAlertHistoryPaginated(db db.Database, userID, limit, offset int) ([]AlertLog, int, error) {
+	var total int
+	db.QueryRow("SELECT COUNT(*) FROM alert_logs WHERE user_id = ?", userID).Scan(&total)
+
+	rows, err := db.Query(
+		"SELECT id, user_id, ticket_id, tag, alert_type, timestamp FROM alert_logs WHERE user_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+		userID, limit, offset,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var logs []AlertLog
+	for rows.Next() {
+		var l AlertLog
+		if err := rows.Scan(&l.ID, &l.UserID, &l.TicketID, &l.Tag, &l.AlertType, &l.Timestamp); err != nil {
+			return nil, 0, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, total, nil
 }

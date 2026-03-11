@@ -96,6 +96,54 @@ func TestSlaConditionMatches(t *testing.T) {
 			shouldMatch: false,
 		},
 		{
+			name: "next_reply_time - 1.5 hours remaining",
+			metric: SLAPolicyMetric{
+				BreachAt: time.Now().Add(1*time.Hour + 30*time.Minute),
+				Stage:    "active",
+				Metric:   "next_reply_time",
+			},
+			expectedLabel: "Less than 2 hours remaining",
+			expectedColor: "#F1C40F",
+			expectedType:  MetricTypeReply,
+			shouldMatch:   true,
+		},
+		{
+			name: "total_resolution_time - 2.5 hours remaining",
+			metric: SLAPolicyMetric{
+				BreachAt: time.Now().Add(2*time.Hour + 30*time.Minute),
+				Stage:    "active",
+				Metric:   "total_resolution_time",
+			},
+			expectedLabel: "Less than 3 hours remaining",
+			expectedColor: "#3498DB",
+			expectedType:  MetricTypeResolution,
+			shouldMatch:   true,
+		},
+		{
+			name: "total_resolution_time - breached 2 hours ago",
+			metric: SLAPolicyMetric{
+				BreachAt: time.Now().Add(-2 * time.Hour),
+				Stage:    "active",
+				Metric:   "total_resolution_time",
+			},
+			expectedLabel: "BREACHED",
+			expectedColor: "#FF0000",
+			expectedType:  MetricTypeResolution,
+			shouldMatch:   true,
+		},
+		{
+			name: "next_reply_time - breached 12 hours ago",
+			metric: SLAPolicyMetric{
+				BreachAt: time.Now().Add(-12 * time.Hour),
+				Stage:    "active",
+				Metric:   "next_reply_time",
+			},
+			expectedLabel: "BREACHED",
+			expectedColor: "#FF0000",
+			expectedType:  MetricTypeReply,
+			shouldMatch:   true,
+		},
+		{
 			name: "Unknown metric type",
 			metric: SLAPolicyMetric{
 				BreachAt: time.Now().Add(1 * time.Hour),
@@ -114,27 +162,27 @@ func TestSlaConditionMatches(t *testing.T) {
 			shouldMatch: false,
 		},
 		{
-			name: "SLA breached more than 3 hours ago - should not match",
+			name: "SLA breached more than MaxBreachAge ago - should not match",
 			metric: SLAPolicyMetric{
-				BreachAt: time.Now().Add(-4 * time.Hour), // Breached 4 hours ago
+				BreachAt: time.Now().Add(-25 * time.Hour),
 				Stage:    "active",
 				Metric:   "reply_time",
 			},
 			shouldMatch: false,
 		},
 		{
-			name: "SLA breached exactly at 3 hour threshold - should not match",
+			name: "SLA breached exactly at MaxBreachAge threshold - should not match",
 			metric: SLAPolicyMetric{
-				BreachAt: time.Now().Add(-3*time.Hour - 1*time.Second), // Just over 3 hours ago
+				BreachAt: time.Now().Add(-24*time.Hour - 1*time.Second),
 				Stage:    "active",
 				Metric:   "reply_time",
 			},
 			shouldMatch: false,
 		},
 		{
-			name: "SLA breached just under 3 hours ago - should match",
+			name: "SLA breached just under MaxBreachAge - should match",
 			metric: SLAPolicyMetric{
-				BreachAt: time.Now().Add(-2*time.Hour - 59*time.Minute), // Just under 3 hours ago
+				BreachAt: time.Now().Add(-23*time.Hour - 59*time.Minute),
 				Stage:    "active",
 				Metric:   "resolution_time",
 			},

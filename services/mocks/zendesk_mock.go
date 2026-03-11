@@ -100,5 +100,17 @@ func (m *MockZendeskClient) GenerateDailySummary(userEmail string, slackService 
 	return args.String(0), args.Error(1)
 }
 
+// AssignTicket mocks the AssignTicket method.
+func (m *MockZendeskClient) AssignTicket(ticketID int64, assigneeID int64) error {
+	args := m.Called(ticketID, assigneeID)
+	return args.Error(0)
+}
+
+// AddInternalNote mocks the AddInternalNote method.
+func (m *MockZendeskClient) AddInternalNote(ticketID int64, body string) error {
+	args := m.Called(ticketID, body)
+	return args.Error(0)
+}
+
 // Ensure MockZendeskClient implements ZendeskClientInterface.
 var _ services.ZendeskClientInterface = (*MockZendeskClient)(nil)

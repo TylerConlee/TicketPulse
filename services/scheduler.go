@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/TylerConlee/TicketPulse/db"
+	"github.com/TylerConlee/TicketPulse/logging"
 	"github.com/TylerConlee/TicketPulse/models"
 )
 
@@ -25,21 +27,29 @@ func NewSchedulerService(db db.Database, slackService *SlackService) *SchedulerS
 }
 
 // StartScheduler starts the scheduler that checks for users who need daily summaries
+// and periodically refreshes the Zendesk tag cache.
 func (s *SchedulerService) StartScheduler(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
+	summaryTicker := time.NewTicker(1 * time.Minute)
+	defer summaryTicker.Stop()
 
-	log.Println("Daily summary scheduler started")
+	tagCacheTicker := time.NewTicker(6 * time.Hour)
+	defer tagCacheTicker.Stop()
+
+	log.Println("Scheduler started (daily summaries + tag cache refresh)")
+
+	s.refreshTagCache()
 
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("Scheduler stopped")
 			return
-		case <-ticker.C:
+		case <-summaryTicker.C:
 			if err := s.checkAndSendSummaries(ctx); err != nil {
 				log.Printf("Error checking for daily summaries: %v", err)
 			}
+		case <-tagCacheTicker.C:
+			s.refreshTagCache()
 		}
 	}
 }
@@ -51,69 +61,89 @@ func (s *SchedulerService) checkAndSendSummaries(ctx context.Context) error {
 		return fmt.Errorf("failed to get users with daily summary enabled: %w", err)
 	}
 
+	logging.Debug(logging.AreaScheduler, "checkAndSendSummaries: found %d users with daily summary enabled", len(users))
+
 	now := time.Now()
 
+	// Collect users that need summaries
+	type summaryTask struct {
+		user  models.User
+		today time.Time
+	}
+	var tasks []summaryTask
+
 	for _, user := range users {
-		// Check if user has summary time configured
 		if !user.SummaryTime.Valid {
+			logging.Debug(logging.AreaScheduler, "User %s: no summary time configured, skipping", user.Email)
 			continue
 		}
 
-		// Check if user has work day settings configured
 		if !user.WorkDayStartTime.Valid || !user.WorkDayEndTime.Valid || !user.Timezone.Valid {
 			log.Printf("User %s has daily summary enabled but missing work day settings, skipping", user.Email)
 			continue
 		}
 
-		// Load user's timezone
 		loc, err := time.LoadLocation(user.Timezone.String)
 		if err != nil {
 			log.Printf("Invalid timezone for user %s: %v", user.Email, err)
 			continue
 		}
 
-		// Get current time in user's timezone
 		nowInTZ := now.In(loc)
 		summaryTime := user.SummaryTime.Time
 
-		// Check if current time matches summary time (within 1 minute window)
-		currentHour := nowInTZ.Hour()
-		currentMinute := nowInTZ.Minute()
-		targetHour := summaryTime.Hour()
-		targetMinute := summaryTime.Minute()
-
-		// Calculate time difference in minutes
-		currentMinutes := currentHour*60 + currentMinute
-		targetMinutes := targetHour*60 + targetMinute
+		currentMinutes := nowInTZ.Hour()*60 + nowInTZ.Minute()
+		targetMinutes := summaryTime.Hour()*60 + summaryTime.Minute()
 
 		timeDiff := currentMinutes - targetMinutes
 		if timeDiff < 0 {
 			timeDiff = -timeDiff
 		}
 
-		// If we're within 1 minute of the target time, send summary
+		logging.Debug(logging.AreaScheduler, "User %s: current=%02d:%02d target=%02d:%02d diff=%dm (tz=%s)",
+			user.Email, nowInTZ.Hour(), nowInTZ.Minute(), summaryTime.Hour(), summaryTime.Minute(), timeDiff, user.Timezone.String)
+
 		if timeDiff <= 1 {
-			// Check if summary was already sent today
 			today := time.Date(nowInTZ.Year(), nowInTZ.Month(), nowInTZ.Day(), 0, 0, 0, 0, loc)
 			_, err := models.GetDailySummaryLog(ctx, s.db, user.ID, today)
 			if err == nil {
-				// Summary already sent today, skip
+				logging.Debug(logging.AreaScheduler, "User %s: summary already sent today, skipping", user.Email)
 				continue
 			}
-
-			// Send summary
-			if err := s.sendDailySummary(ctx, user); err != nil {
-				log.Printf("Failed to send daily summary to user %s: %v", user.Email, err)
-				continue
-			}
-
-			// Log that summary was sent
-			if err := models.CreateDailySummaryLog(ctx, s.db, user.ID, today); err != nil {
-				log.Printf("Failed to log daily summary for user %s: %v", user.Email, err)
-			}
+			tasks = append(tasks, summaryTask{user: user, today: today})
 		}
 	}
 
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	// Send summaries concurrently with bounded parallelism
+	const maxConcurrency = 3
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+
+	for _, task := range tasks {
+		wg.Add(1)
+		go func(t summaryTask) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			logging.Debug(logging.AreaScheduler, "User %s: sending daily summary now", t.user.Email)
+			if err := s.sendDailySummary(ctx, t.user); err != nil {
+				log.Printf("Failed to send daily summary to user %s: %v", t.user.Email, err)
+				return
+			}
+
+			if err := models.CreateDailySummaryLog(ctx, s.db, t.user.ID, t.today); err != nil {
+				log.Printf("Failed to log daily summary for user %s: %v", t.user.Email, err)
+			}
+			logging.Debug(logging.AreaScheduler, "User %s: daily summary sent and logged successfully", t.user.Email)
+		}(task)
+	}
+
+	wg.Wait()
 	return nil
 }
 
@@ -166,4 +196,26 @@ func (s *SchedulerService) sendDailySummary(ctx context.Context, user models.Use
 
 	log.Printf("Daily summary sent to user %s", user.Email)
 	return nil
+}
+
+// refreshTagCache fetches all tags from Zendesk and stores them in the cache table.
+func (s *SchedulerService) refreshTagCache() {
+	zc, err := NewZendeskClient(s.db)
+	if err != nil {
+		log.Printf("Tag cache refresh: failed to create Zendesk client: %v", err)
+		return
+	}
+
+	tags, err := zc.ListAllTags()
+	if err != nil {
+		log.Printf("Tag cache refresh: failed to list tags from Zendesk: %v", err)
+		return
+	}
+
+	if err := models.ClearAndReplaceCachedTags(s.db, tags); err != nil {
+		log.Printf("Tag cache refresh: failed to store tags: %v", err)
+		return
+	}
+
+	log.Printf("Tag cache refresh: cached %d tags from Zendesk", len(tags))
 }

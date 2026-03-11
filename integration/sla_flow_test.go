@@ -275,11 +275,11 @@ func TestTagAlertWithUserAssociation(t *testing.T) {
 	user2 := createIntegrationTestUser(t, database, "user2@example.com")
 
 	// Create tag alerts for each user
-	err := models.CreateTagAlert(database, user1.ID, "billing", "C12345", services.AlertTypeSLAReply)
+	err := models.CreateTagAlert(database, user1.ID, "billing", "C12345", "general", services.AlertTypeSLAReply)
 	require.NoError(t, err)
-	err = models.CreateTagAlert(database, user1.ID, "urgent", "C12345", services.AlertTypeSLAResolution)
+	err = models.CreateTagAlert(database, user1.ID, "urgent", "C12345", "general", services.AlertTypeSLAResolution)
 	require.NoError(t, err)
-	err = models.CreateTagAlert(database, user2.ID, "support", "C67890", services.AlertTypeNewTicket)
+	err = models.CreateTagAlert(database, user2.ID, "support", "C67890", "support-team", services.AlertTypeNewTicket)
 	require.NoError(t, err)
 
 	// Verify user1's alerts

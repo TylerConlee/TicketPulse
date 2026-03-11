@@ -1,0 +1,333 @@
+{{define "content"}}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <p class="text-sm text-gray-500 mt-1">Manage tag-based notifications sent to Slack channels.</p>
+  </div>
+  <div class="flex items-center gap-3">
+    <a href="/alerts/history" class="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      History
+    </a>
+    <button onclick="openAddModal()" class="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+      Add Alert
+    </button>
+  </div>
+</div>
+
+<!-- Bulk action bar (hidden by default) -->
+<div id="bulkBar" class="hidden mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between">
+  <span class="text-sm text-blue-700"><span id="bulkCount">0</span> alert(s) selected</span>
+  <form method="POST" action="/alerts/bulk-delete" id="bulkDeleteForm" onsubmit="return confirm('Delete selected alerts?');">
+    {{$.CSRFField}}
+    <div id="bulkIdsContainer"></div>
+    <button type="submit" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+      Delete Selected
+    </button>
+  </form>
+</div>
+
+<!-- Channel-grouped cards -->
+{{if .ChannelGroups}}
+<div class="space-y-6">
+  {{range .ChannelGroups}}
+  <div class="bg-white rounded-xl border border-gray-200 shadow-sm">
+    <div class="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
+      <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 8.25h15m-16.5 7.5h15m-1.8-13.5l-3.6 19.5m-2.1-19.5l-3.6 19.5"/></svg>
+      <h3 class="text-sm font-semibold text-gray-900">{{.ChannelName}}</h3>
+      <span class="ml-auto text-xs text-gray-400">{{len .Alerts}} alert{{if ne (len .Alerts) 1}}s{{end}}</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-gray-100">
+            <th class="w-10 px-4 py-3"><input type="checkbox" class="select-all-channel rounded border-gray-300 text-brand-600 focus:ring-brand-500" data-channel="{{.ChannelID}}"></th>
+            <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Tag</th>
+            <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
+            <th class="text-right px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-50">
+          {{range .Alerts}}
+          <tr class="hover:bg-gray-50 alert-row" data-alert-id="{{.ID}}">
+            <!-- View mode -->
+            <td class="px-4 py-3 view-cell">
+              <input type="checkbox" class="bulk-checkbox rounded border-gray-300 text-brand-600 focus:ring-brand-500" value="{{.ID}}">
+            </td>
+            <td class="px-6 py-3 view-cell">
+              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">{{.Tag}}</span>
+            </td>
+            <td class="px-6 py-3 view-cell">
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium
+                {{if eq .AlertType "new_ticket"}}bg-green-50 text-green-700
+                {{else if eq .AlertType "ticket_update"}}bg-yellow-50 text-yellow-700
+                {{else if eq .AlertType "sla_deadline"}}bg-red-50 text-red-700
+                {{else if eq .AlertType "sla_reply"}}bg-orange-50 text-orange-700
+                {{else if eq .AlertType "sla_resolution"}}bg-purple-50 text-purple-700
+                {{else}}bg-gray-50 text-gray-700{{end}}">{{.AlertType}}</span>
+            </td>
+            <td class="px-6 py-3 text-right view-cell">
+              <button onclick="startEdit(this.closest('tr'))" class="text-gray-500 hover:text-brand-600 text-sm font-medium transition-colors mr-2">Edit</button>
+              <form method="POST" action="/alerts/delete/{{.ID}}" onsubmit="return confirm('Delete this alert?');" class="inline">
+                {{$.CSRFField}}
+                <button type="submit" class="text-red-600 hover:text-red-800 text-sm font-medium transition-colors">Delete</button>
+              </form>
+            </td>
+            <!-- Edit mode (hidden) -->
+            <td class="px-4 py-3 edit-cell hidden" colspan="4">
+              <form method="POST" action="/alerts/update/{{.ID}}" class="flex items-center gap-3">
+                {{$.CSRFField}}
+                <div class="relative flex-1">
+                  <input type="text" name="tag" value="{{.Tag}}" required class="tag-autocomplete-input w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none" autocomplete="off">
+                  <div class="tag-autocomplete-dropdown hidden absolute z-10 mt-1 w-full bg-white rounded-lg border border-gray-200 shadow-lg max-h-40 overflow-y-auto"></div>
+                </div>
+                <div class="channel-combobox relative" data-selected-id="{{.SlackChannelID}}" data-selected-name="{{.SlackChannelName}}">
+                  <input type="hidden" name="slack_channel" value="{{.SlackChannelID}}">
+                  <input type="text" value="#{{.SlackChannelName}}" autocomplete="off" class="channel-search-input rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none bg-white w-44" placeholder="Search channels...">
+                  <div class="channel-dropdown hidden absolute z-20 mt-1 w-full bg-white rounded-lg border border-gray-200 shadow-lg max-h-48 overflow-y-auto"></div>
+                </div>
+                <select name="alert_type" class="rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none bg-white">
+                  <option value="new_ticket" {{if eq .AlertType "new_ticket"}}selected{{end}}>New Ticket</option>
+                  <option value="sla_deadline" {{if eq .AlertType "sla_deadline"}}selected{{end}}>SLA Deadline</option>
+                  <option value="sla_reply" {{if eq .AlertType "sla_reply"}}selected{{end}}>SLA Reply</option>
+                  <option value="sla_resolution" {{if eq .AlertType "sla_resolution"}}selected{{end}}>SLA Resolution</option>
+                  <option value="ticket_update" {{if eq .AlertType "ticket_update"}}selected{{end}}>Ticket Update</option>
+                </select>
+                <button type="submit" class="px-3 py-1.5 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">Save</button>
+                <button type="button" onclick="cancelEdit(this.closest('tr'))" class="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{end}}
+</div>
+{{else}}
+<div class="bg-white rounded-xl border border-gray-200 shadow-sm">
+  <div class="px-6 py-16 text-center">
+    <svg class="w-12 h-12 text-gray-300 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+    <p class="text-gray-500 text-sm mb-4">No alerts configured yet. Create your first alert to start receiving Slack notifications.</p>
+    <button onclick="openAddModal()" class="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+      Add Your First Alert
+    </button>
+  </div>
+</div>
+{{end}}
+
+<!-- Add Alert Modal -->
+<div id="addAlertModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50">
+  <div class="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 flex flex-col">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+      <h3 class="text-sm font-semibold text-gray-900">Add Tag Alert</h3>
+      <button onclick="closeAddModal()" class="p-1 rounded-lg hover:bg-gray-100 transition-colors">
+        <svg class="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="p-6">
+      <form method="POST" action="/alerts/add" class="space-y-4">
+        {{$.CSRFField}}
+        <div>
+          <label for="modal-tag" class="block text-sm font-medium text-gray-700 mb-1">Tag</label>
+          <div class="relative">
+            <input type="text" name="tag" id="modal-tag" required placeholder="e.g. billing, urgent" autocomplete="off" class="tag-autocomplete-input w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none">
+            <div class="tag-autocomplete-dropdown hidden absolute z-10 mt-1 w-full bg-white rounded-lg border border-gray-200 shadow-lg max-h-48 overflow-y-auto"></div>
+          </div>
+          <p class="mt-1 text-xs text-gray-400">Start typing to see Zendesk tag suggestions, or enter a custom tag.</p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Slack Channel</label>
+          <div class="channel-combobox relative" data-selected-id="" data-selected-name="">
+            <input type="hidden" name="slack_channel" value="">
+            <input type="text" autocomplete="off" class="channel-search-input w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none bg-white" placeholder="Search channels...">
+            <div class="channel-dropdown hidden absolute z-20 mt-1 w-full bg-white rounded-lg border border-gray-200 shadow-lg max-h-48 overflow-y-auto"></div>
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">Alert Types</label>
+          <div class="space-y-2">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" name="alert_type" value="new_ticket" checked class="rounded border-gray-300 text-brand-600 focus:ring-brand-500">
+              <span class="text-sm text-gray-700">New Ticket</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" name="alert_type" value="sla_deadline" class="rounded border-gray-300 text-brand-600 focus:ring-brand-500">
+              <span class="text-sm text-gray-700">SLA Deadline (All Types)</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" name="alert_type" value="sla_reply" class="rounded border-gray-300 text-brand-600 focus:ring-brand-500">
+              <span class="text-sm text-gray-700">SLA Reply Time</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" name="alert_type" value="sla_resolution" class="rounded border-gray-300 text-brand-600 focus:ring-brand-500">
+              <span class="text-sm text-gray-700">SLA Resolution Time</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" name="alert_type" value="ticket_update" class="rounded border-gray-300 text-brand-600 focus:ring-brand-500">
+              <span class="text-sm text-gray-700">Ticket Update</span>
+            </label>
+          </div>
+        </div>
+        <button type="submit" class="w-full inline-flex justify-center items-center px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">Add Alert</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+var slackChannels = [{{range $i, $ch := .SlackChannels}}{{if $i}},{{end}}{"id":"{{$ch.ID}}","name":"{{$ch.Name}}"}{{end}}];
+
+function openAddModal() {
+  var modal = document.getElementById('addAlertModal');
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  document.getElementById('modal-tag').focus();
+}
+
+function closeAddModal() {
+  var modal = document.getElementById('addAlertModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+function startEdit(row) {
+  row.querySelectorAll('.view-cell').forEach(function(el) { el.classList.add('hidden'); });
+  row.querySelectorAll('.edit-cell').forEach(function(el) { el.classList.remove('hidden'); });
+}
+
+function cancelEdit(row) {
+  row.querySelectorAll('.edit-cell').forEach(function(el) { el.classList.add('hidden'); });
+  row.querySelectorAll('.view-cell').forEach(function(el) { el.classList.remove('hidden'); });
+}
+
+// Channel combobox
+(function() {
+  function renderDropdown(dropdown, channels, onSelect) {
+    dropdown.innerHTML = '';
+    if (channels.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'px-3 py-2 text-sm text-gray-400';
+      empty.textContent = 'No channels found';
+      dropdown.appendChild(empty);
+    } else {
+      channels.forEach(function(ch) {
+        var item = document.createElement('div');
+        item.className = 'px-3 py-2 text-sm cursor-pointer hover:bg-brand-50 hover:text-brand-700 transition-colors';
+        item.textContent = '#' + ch.name;
+        item.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          onSelect(ch);
+        });
+        dropdown.appendChild(item);
+      });
+    }
+    dropdown.classList.remove('hidden');
+  }
+
+  function filterChannels(query) {
+    if (!query) return slackChannels.slice(0, 30);
+    var q = query.toLowerCase().replace(/^#/, '');
+    return slackChannels.filter(function(ch) {
+      return ch.name.toLowerCase().indexOf(q) !== -1;
+    }).slice(0, 30);
+  }
+
+  function initComboboxes() {
+    document.querySelectorAll('.channel-combobox').forEach(function(wrapper) {
+      var hiddenInput = wrapper.querySelector('input[type="hidden"]');
+      var searchInput = wrapper.querySelector('.channel-search-input');
+      var dropdown = wrapper.querySelector('.channel-dropdown');
+
+      function selectChannel(ch) {
+        hiddenInput.value = ch.id;
+        searchInput.value = '#' + ch.name;
+        dropdown.classList.add('hidden');
+      }
+
+      searchInput.addEventListener('focus', function() {
+        searchInput.select();
+        renderDropdown(dropdown, filterChannels(searchInput.value), selectChannel);
+      });
+
+      searchInput.addEventListener('input', function() {
+        hiddenInput.value = '';
+        renderDropdown(dropdown, filterChannels(searchInput.value), selectChannel);
+      });
+
+      searchInput.addEventListener('blur', function() {
+        setTimeout(function() {
+          dropdown.classList.add('hidden');
+          if (!hiddenInput.value && searchInput.value) {
+            var exact = slackChannels.find(function(ch) {
+              return ch.name.toLowerCase() === searchInput.value.toLowerCase().replace(/^#/, '');
+            });
+            if (exact) {
+              selectChannel(exact);
+            } else {
+              searchInput.value = '';
+            }
+          }
+        }, 150);
+      });
+
+      searchInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          dropdown.classList.add('hidden');
+          searchInput.blur();
+        }
+      });
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initComboboxes);
+  } else {
+    initComboboxes();
+  }
+})();
+
+// Bulk selection
+document.addEventListener('DOMContentLoaded', function() {
+  var checkboxes = document.querySelectorAll('.bulk-checkbox');
+  var bulkBar = document.getElementById('bulkBar');
+  var bulkCount = document.getElementById('bulkCount');
+  var bulkIdsContainer = document.getElementById('bulkIdsContainer');
+
+  function updateBulkBar() {
+    var checked = document.querySelectorAll('.bulk-checkbox:checked');
+    if (checked.length > 0) {
+      bulkBar.classList.remove('hidden');
+      bulkCount.textContent = checked.length;
+      bulkIdsContainer.innerHTML = '';
+      checked.forEach(function(cb) {
+        var input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'alert_ids';
+        input.value = cb.value;
+        bulkIdsContainer.appendChild(input);
+      });
+    } else {
+      bulkBar.classList.add('hidden');
+    }
+  }
+
+  checkboxes.forEach(function(cb) {
+    cb.addEventListener('change', updateBulkBar);
+  });
+
+  document.querySelectorAll('.select-all-channel').forEach(function(selectAll) {
+    selectAll.addEventListener('change', function() {
+      var card = this.closest('.bg-white');
+      card.querySelectorAll('.bulk-checkbox').forEach(function(cb) {
+        cb.checked = selectAll.checked;
+      });
+      updateBulkBar();
+    });
+  });
+});
+</script>
+{{end}}

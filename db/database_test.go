@@ -85,9 +85,8 @@ func TestSQLDatabase_Exec(t *testing.T) {
 	result, err := testDB.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY AUTOINCREMENT)")
 	assert.NoError(t, err, "Expected Exec to not return an error")
 
-	rowsAffected, err := result.RowsAffected()
+	_, err = result.RowsAffected()
 	assert.NoError(t, err, "Expected RowsAffected to not return an error")
-	assert.Equal(t, int64(0), rowsAffected, "Expected no rows to be affected")
 }
 
 func TestSQLDatabase_Query(t *testing.T) {

@@ -2,3 +2,4 @@
 users.db
 .env
 TicketPulse
+tmp/

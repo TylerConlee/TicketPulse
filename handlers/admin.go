@@ -4,12 +4,22 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/mail"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/TylerConlee/TicketPulse/models"
 	"github.com/gorilla/mux"
 )
+
+func isValidEmail(email string) bool {
+	if len(email) > 254 {
+		return false
+	}
+	_, err := mail.ParseAddress(email)
+	return err == nil
+}
 
 func (h *AppHandler) renderTemplate(w http.ResponseWriter, tmpl string, data interface{}) {
 	// Check if we are running in a test environment
@@ -30,6 +40,7 @@ func (h *AppHandler) renderTemplate(w http.ResponseWriter, tmpl string, data int
 	if err != nil {
 		log.Println("Error rendering template:", err)
 		http.Error(w, "Error rendering template", http.StatusInternalServerError)
+		return
 	}
 }
 
@@ -47,7 +58,9 @@ func (h *AppHandler) UserManagementHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	data["Users"] = users
-	data["CurrentUserID"] = data["User"].(models.User).ID
+	if user, ok := data["User"].(models.User); ok {
+		data["CurrentUserID"] = user.ID
+	}
 
 	h.renderTemplate(w, "templates/admin/user_management.html", data)
 }
@@ -88,8 +101,20 @@ func (h *AppHandler) handleEditUserPost(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	user.Name = r.FormValue("name")
-	user.Role = models.Role(r.FormValue("role"))
+	name := strings.TrimSpace(r.FormValue("name"))
+	if name == "" || len(name) > 255 {
+		http.Error(w, "Invalid name", http.StatusBadRequest)
+		return
+	}
+
+	role := models.Role(r.FormValue("role"))
+	if !models.ValidRole(role) {
+		http.Error(w, "Invalid role: must be admin or agent", http.StatusBadRequest)
+		return
+	}
+
+	user.Name = name
+	user.Role = role
 	user.DailySummary = r.FormValue("daily_summary") == "on"
 
 	err = models.UpdateUser(h.DB, user)
@@ -142,10 +167,23 @@ func (h *AppHandler) NewUserHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == "POST" {
-		email := r.FormValue("email")
-		name := r.FormValue("name")
+		email := strings.TrimSpace(r.FormValue("email"))
+		name := strings.TrimSpace(r.FormValue("name"))
 		role := models.Role(r.FormValue("role"))
 		dailySummary := r.FormValue("daily_summary") == "on"
+
+		if !isValidEmail(email) {
+			http.Error(w, "Invalid email address", http.StatusBadRequest)
+			return
+		}
+		if name == "" || len(name) > 255 {
+			http.Error(w, "Invalid name", http.StatusBadRequest)
+			return
+		}
+		if !models.ValidRole(role) {
+			http.Error(w, "Invalid role: must be admin or agent", http.StatusBadRequest)
+			return
+		}
 
 		err := models.CreateUser(h.DB, email, name, role, dailySummary)
 		if err != nil {
@@ -193,8 +231,14 @@ func (h *AppHandler) DeleteTagAlertHandler(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *AppHandler) getCurrentUser(r *http.Request) models.User {
-	session, _ := store.Get(r, "session-name")
-	userID := session.Values["user_id"].(int)
+	session, err := store.Get(r, "session-name")
+	if err != nil {
+		return models.User{}
+	}
+	userID, ok := session.Values["user_id"].(int)
+	if !ok {
+		return models.User{}
+	}
 	user, _ := models.GetUserByID(h.DB, userID)
 	return user
 }

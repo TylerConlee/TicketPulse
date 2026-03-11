@@ -1,15 +1,17 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/TylerConlee/TicketPulse/logging"
 	"github.com/TylerConlee/TicketPulse/models"
 	"github.com/nukosuke/go-zendesk/zendesk"
 )
@@ -32,8 +34,11 @@ func (zc *ZendeskClient) SearchTicketsWithActiveSLA() ([]zendesk.Ticket, map[int
 	params.Set("include", "tickets(slas)")
 
 	endpoint := fmt.Sprintf("https://%s.zendesk.com/api/v2/search.json?%s", zc.Subdomain, params.Encode())
+	logging.Debug(logging.AreaZendesk, "SearchTicketsWithActiveSLA: query=%q endpoint=%s", query, endpoint)
 
+	page := 0
 	for endpoint != "" {
+		page++
 		req, err := http.NewRequestWithContext(context.Background(), "GET", endpoint, nil)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create request: %w", err)
@@ -41,15 +46,25 @@ func (zc *ZendeskClient) SearchTicketsWithActiveSLA() ([]zendesk.Ticket, map[int
 		req.SetBasicAuth(zc.Email+"/token", zc.APIToken)
 		req.Header.Set("Content-Type", "application/json")
 
+		logging.Debug(logging.AreaZendesk, "SearchTicketsWithActiveSLA: fetching page %d", page)
 		resp, err := zc.httpClient.Do(req)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to perform request: %w", err)
 		}
 		defer resp.Body.Close()
 
+		logging.Debug(logging.AreaZendesk, "SearchTicketsWithActiveSLA: response status=%s", resp.Status)
+
 		if resp.StatusCode != http.StatusOK {
 			return nil, nil, fmt.Errorf("failed to search tickets: received status %s", resp.Status)
 		}
+
+		// Read the full body so we can log it and still decode
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read response body: %w", err)
+		}
+		logging.Debug(logging.AreaZendesk, "SearchTicketsWithActiveSLA: raw response body (%d bytes):\n%s", len(bodyBytes), string(bodyBytes))
 
 		var result struct {
 			Results []struct {
@@ -60,9 +75,12 @@ func (zc *ZendeskClient) SearchTicketsWithActiveSLA() ([]zendesk.Ticket, map[int
 			} `json:"results"`
 			NextPage string `json:"next_page"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&result); err != nil {
 			return nil, nil, fmt.Errorf("failed to parse ticket search response: %w", err)
 		}
+
+		logging.Debug(logging.AreaZendesk, "SearchTicketsWithActiveSLA: page %d returned %d results, next_page=%q",
+			page, len(result.Results), result.NextPage)
 
 		for _, ticketResult := range result.Results {
 			allTickets = append(allTickets, ticketResult.Ticket)
@@ -70,12 +88,22 @@ func (zc *ZendeskClient) SearchTicketsWithActiveSLA() ([]zendesk.Ticket, map[int
 				slaData[ticketResult.Ticket.ID] = SLAInfo{
 					PolicyMetrics: ticketResult.SLAMetrics.PolicyMetrics,
 				}
+				logging.Debug(logging.AreaZendesk, "Ticket #%d: found %d SLA policy metrics",
+					ticketResult.Ticket.ID, len(ticketResult.SLAMetrics.PolicyMetrics))
+				for i, m := range ticketResult.SLAMetrics.PolicyMetrics {
+					logging.Debug(logging.AreaZendesk, "  Ticket #%d metric[%d]: metric=%q stage=%q breach_at=%s",
+						ticketResult.Ticket.ID, i, m.Metric, m.Stage, m.BreachAt.Format(time.RFC3339))
+				}
+			} else {
+				logging.Debug(logging.AreaZendesk, "Ticket #%d: no SLA policy metrics in response", ticketResult.Ticket.ID)
 			}
 		}
 
 		endpoint = result.NextPage
 	}
 
+	logging.Debug(logging.AreaZendesk, "SearchTicketsWithActiveSLA: total tickets=%d, tickets with SLA data=%d",
+		len(allTickets), len(slaData))
 	return allTickets, slaData, nil
 }
 
@@ -88,8 +116,11 @@ func (zc *ZendeskClient) SearchNewOrUpdatedTickets(since time.Time) ([]zendesk.T
 	params.Set("query", query)
 
 	endpoint := fmt.Sprintf("https://%s.zendesk.com/api/v2/search.json?%s", zc.Subdomain, params.Encode())
+	logging.Debug(logging.AreaZendesk, "SearchNewOrUpdatedTickets: since=%s query=%q", since.Format(time.RFC3339), query)
 
+	page := 0
 	for endpoint != "" {
+		page++
 		req, err := http.NewRequestWithContext(context.Background(), "GET", endpoint, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
@@ -103,6 +134,8 @@ func (zc *ZendeskClient) SearchNewOrUpdatedTickets(since time.Time) ([]zendesk.T
 		}
 		defer resp.Body.Close()
 
+		logging.Debug(logging.AreaZendesk, "SearchNewOrUpdatedTickets: page %d status=%s", page, resp.Status)
+
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("failed to search tickets: received status %s", resp.Status)
 		}
@@ -115,11 +148,17 @@ func (zc *ZendeskClient) SearchNewOrUpdatedTickets(since time.Time) ([]zendesk.T
 			return nil, fmt.Errorf("failed to parse ticket search response: %w", err)
 		}
 
-		allTickets = append(allTickets, result.Results...)
+		logging.Debug(logging.AreaZendesk, "SearchNewOrUpdatedTickets: page %d returned %d tickets", page, len(result.Results))
+		for _, t := range result.Results {
+			logging.Debug(logging.AreaZendesk, "  Ticket #%d: subject=%q status=%s updated=%s tags=%v",
+				t.ID, t.Subject, t.Status, t.UpdatedAt.Format(time.RFC3339), t.Tags)
+		}
 
+		allTickets = append(allTickets, result.Results...)
 		endpoint = result.NextPage
 	}
 
+	logging.Debug(logging.AreaZendesk, "SearchNewOrUpdatedTickets: total=%d tickets", len(allTickets))
 	return allTickets, nil
 }
 
@@ -310,7 +349,7 @@ func (zc *ZendeskClient) GenerateDailySummary(userEmail string, slackService *Sl
 	// Step 11: Send the Slack message as a DM using block formatting
 	err = sendSlackDM(slackService, sUID, unreadTickets, openTicketsWithSLA, csatRatings, slaData)
 	if err != nil {
-		log.Printf("failed to send Slack DM: %v", err)
+		return summaryMessage, fmt.Errorf("failed to send Slack DM: %w", err)
 	}
 
 	return summaryMessage, nil

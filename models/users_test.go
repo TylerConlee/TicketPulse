@@ -1,6 +1,7 @@
 package models
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -75,9 +76,8 @@ func TestGetUserByEmail_NotFound(t *testing.T) {
 	database := setupTestDB(t)
 	defer database.Close()
 
-	user, err := GetUserByEmail(database, "nonexistent@example.com")
-	assert.NoError(t, err)
-	assert.Empty(t, user.Email) // Empty user returned when not found
+	_, err := GetUserByEmail(database, "nonexistent@example.com")
+	assert.ErrorIs(t, err, ErrUserNotFound)
 }
 
 func TestGetUserByID(t *testing.T) {
@@ -143,9 +143,8 @@ func TestDeleteUserByID(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Verify deletion
-	deletedUser, err := GetUserByEmail(database, "test@example.com")
-	assert.NoError(t, err)
-	assert.Empty(t, deletedUser.Email)
+	_, err = GetUserByEmail(database, "test@example.com")
+	assert.ErrorIs(t, err, ErrUserNotFound)
 }
 
 func TestIsFirstUser(t *testing.T) {
@@ -287,7 +286,7 @@ func TestCreateTagAlert(t *testing.T) {
 	user, err := GetUserByEmail(database, "test@example.com")
 	require.NoError(t, err)
 
-	err = CreateTagAlert(database, user.ID, "urgent", "C12345678", "sla_reply")
+	err = CreateTagAlert(database, user.ID, "urgent", "C12345678", "general", "sla_reply")
 	assert.NoError(t, err)
 
 	alerts, err := GetTagAlertsByUser(database, user.ID)
@@ -295,6 +294,7 @@ func TestCreateTagAlert(t *testing.T) {
 	assert.Len(t, alerts, 1)
 	assert.Equal(t, "urgent", alerts[0].Tag)
 	assert.Equal(t, "C12345678", alerts[0].SlackChannelID)
+	assert.Equal(t, "general", alerts[0].SlackChannelName)
 	assert.Equal(t, "sla_reply", alerts[0].AlertType)
 }
 
@@ -308,10 +308,9 @@ func TestGetTagAlertsByUser(t *testing.T) {
 	user, err := GetUserByEmail(database, "test@example.com")
 	require.NoError(t, err)
 
-	// Create multiple alerts
-	err = CreateTagAlert(database, user.ID, "urgent", "C12345678", "sla_reply")
+	err = CreateTagAlert(database, user.ID, "urgent", "C12345678", "general", "sla_reply")
 	require.NoError(t, err)
-	err = CreateTagAlert(database, user.ID, "billing", "C12345678", "new_ticket")
+	err = CreateTagAlert(database, user.ID, "billing", "C12345678", "general", "new_ticket")
 	require.NoError(t, err)
 
 	alerts, err := GetTagAlertsByUser(database, user.ID)
@@ -344,7 +343,7 @@ func TestDeleteTagAlert(t *testing.T) {
 	user, err := GetUserByEmail(database, "test@example.com")
 	require.NoError(t, err)
 
-	err = CreateTagAlert(database, user.ID, "urgent", "C12345678", "sla_reply")
+	err = CreateTagAlert(database, user.ID, "urgent", "C12345678", "general", "sla_reply")
 	require.NoError(t, err)
 
 	alerts, err := GetTagAlertsByUser(database, user.ID)
@@ -375,9 +374,9 @@ func TestGetAllTagAlerts(t *testing.T) {
 	user2, err := GetUserByEmail(database, "user2@example.com")
 	require.NoError(t, err)
 
-	err = CreateTagAlert(database, user1.ID, "urgent", "C12345678", "sla_reply")
+	err = CreateTagAlert(database, user1.ID, "urgent", "C12345678", "general", "sla_reply")
 	require.NoError(t, err)
-	err = CreateTagAlert(database, user2.ID, "billing", "C87654321", "new_ticket")
+	err = CreateTagAlert(database, user2.ID, "billing", "C87654321", "billing-team", "new_ticket")
 	require.NoError(t, err)
 
 	alerts, err := GetAllTagAlerts(database)
@@ -398,4 +397,218 @@ func TestGetAllTagAlerts_Empty(t *testing.T) {
 	alerts, err := GetAllTagAlerts(database)
 	assert.NoError(t, err)
 	assert.Empty(t, alerts)
+}
+
+// --- UpdateUser Tests ---
+
+func TestUpdateUser(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Old Name", AgentRole, false)
+	require.NoError(t, err)
+
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	user.Name = "New Name"
+	user.Role = AdminRole
+	user.DailySummary = true
+	err = UpdateUser(database, user)
+	assert.NoError(t, err)
+
+	updated, err := GetUserByID(database, user.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, "New Name", updated.Name)
+	assert.Equal(t, AdminRole, updated.Role)
+	assert.True(t, updated.DailySummary)
+}
+
+// --- UpdateSlackUserID Edge Cases ---
+
+func TestUpdateSlackUserID_NonExistentUser(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := UpdateSlackUserID(database, "nonexistent@example.com", "U12345")
+	assert.NoError(t, err)
+}
+
+func TestUpdateSlackUserID_Overwrite(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+
+	err = UpdateSlackUserID(database, "test@example.com", "U_FIRST")
+	require.NoError(t, err)
+
+	err = UpdateSlackUserID(database, "test@example.com", "U_SECOND")
+	require.NoError(t, err)
+
+	user, err := GetUserByEmail(database, "test@example.com")
+	assert.NoError(t, err)
+	assert.Equal(t, "U_SECOND", user.SlackUserID.String)
+}
+
+// --- GetUserByID Full Field Coverage ---
+
+func TestGetUserByID_WithWorkDaySettings(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	startTime := time.Date(2024, 1, 1, 9, 0, 0, 0, time.UTC)
+	endTime := time.Date(2024, 1, 1, 17, 0, 0, 0, time.UTC)
+	err = user.UpdateWorkDaySettings(database, startTime, endTime, "America/Chicago", "Monday,Tuesday,Wednesday")
+	require.NoError(t, err)
+
+	err = user.UpdateSummaryFilterSettings(database, "configured_tags", "assigned_tickets")
+	require.NoError(t, err)
+
+	err = UpdateSlackUserID(database, "test@example.com", "U_TEST123")
+	require.NoError(t, err)
+
+	fetched, err := GetUserByID(database, user.ID)
+	assert.NoError(t, err)
+	assert.Equal(t, "test@example.com", fetched.Email)
+	assert.True(t, fetched.WorkDayStartTime.Valid)
+	assert.True(t, fetched.WorkDayEndTime.Valid)
+	assert.True(t, fetched.Timezone.Valid)
+	assert.Equal(t, "America/Chicago", fetched.Timezone.String)
+	assert.Equal(t, "Monday,Tuesday,Wednesday", fetched.WorkDays)
+	assert.Equal(t, "configured_tags", fetched.SummaryTagFilter)
+	assert.Equal(t, "assigned_tickets", fetched.SummaryTicketFilter)
+	assert.True(t, fetched.SlackUserID.Valid)
+	assert.Equal(t, "U_TEST123", fetched.SlackUserID.String)
+}
+
+// --- ValidRole Tests ---
+
+func TestValidRole(t *testing.T) {
+	assert.True(t, ValidRole(AdminRole))
+	assert.True(t, ValidRole(AgentRole))
+	assert.False(t, ValidRole(Role("superadmin")))
+	assert.False(t, ValidRole(Role("")))
+}
+
+// --- GetAllUsersPaginated Tests ---
+
+func TestGetAllUsersPaginated(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	for i := 0; i < 5; i++ {
+		err := CreateUser(database, fmt.Sprintf("user%d@example.com", i), fmt.Sprintf("User %d", i), AgentRole, false)
+		require.NoError(t, err)
+	}
+
+	page1, err := GetAllUsersPaginated(database, 2, 0)
+	assert.NoError(t, err)
+	assert.Len(t, page1, 2)
+
+	page2, err := GetAllUsersPaginated(database, 2, 2)
+	assert.NoError(t, err)
+	assert.Len(t, page2, 2)
+
+	page3, err := GetAllUsersPaginated(database, 2, 4)
+	assert.NoError(t, err)
+	assert.Len(t, page3, 1)
+
+	pageBeyond, err := GetAllUsersPaginated(database, 2, 10)
+	assert.NoError(t, err)
+	assert.Empty(t, pageBeyond)
+}
+
+// --- GetFirstUserID Tests ---
+
+func TestGetFirstUserID_NoUsers(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	id, err := GetFirstUserID(database)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, id)
+}
+
+func TestGetFirstUserID_WithUsers(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "first@example.com", "First", AdminRole, false)
+	require.NoError(t, err)
+	err = CreateUser(database, "second@example.com", "Second", AgentRole, false)
+	require.NoError(t, err)
+
+	id, err := GetFirstUserID(database)
+	assert.NoError(t, err)
+	assert.Greater(t, id, 0)
+}
+
+// --- GetAllTagAlertsPaginated Tests ---
+
+func TestGetAllTagAlertsPaginated(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	for i := 0; i < 5; i++ {
+		err = CreateTagAlert(database, user.ID, fmt.Sprintf("tag%d", i), "C111", "general", "new_ticket")
+		require.NoError(t, err)
+	}
+
+	page1, err := GetAllTagAlertsPaginated(database, 2, 0)
+	assert.NoError(t, err)
+	assert.Len(t, page1, 2)
+	assert.NotEmpty(t, page1[0].User.Name)
+
+	page2, err := GetAllTagAlertsPaginated(database, 2, 2)
+	assert.NoError(t, err)
+	assert.Len(t, page2, 2)
+
+	page3, err := GetAllTagAlertsPaginated(database, 10, 4)
+	assert.NoError(t, err)
+	assert.Len(t, page3, 1)
+}
+
+// --- GetTagAlertByID Tests ---
+
+func TestGetTagAlertByID(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	err = CreateTagAlert(database, user.ID, "urgent", "C111", "general", "new_ticket")
+	require.NoError(t, err)
+
+	alerts, err := GetTagAlertsByUser(database, user.ID)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1)
+
+	alert, err := GetTagAlertByID(database, alerts[0].ID)
+	assert.NoError(t, err)
+	assert.Equal(t, "urgent", alert.Tag)
+	assert.Equal(t, "C111", alert.SlackChannelID)
+}
+
+func TestGetTagAlertByID_NotFound(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	_, err := GetTagAlertByID(database, 99999)
+	assert.Error(t, err)
 }

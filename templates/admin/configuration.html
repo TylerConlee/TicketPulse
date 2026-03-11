@@ -1,61 +1,69 @@
 {{define "content"}}
-                <form method="POST" action="/admin/configuration" class="needs-validation" novalidate>
-                    <div class="row">
-                        <!-- General Settings Section -->
-                        <div class="col-md-12 grid-margin stretch-card">
-                            <div class="card mb-4">
-                                <div class="card-body">
-                                    <h5 class="card-title">General Settings</h5>
-                                    <div class="form-check form-check-flat form-check-primary">
-                                        <input type="checkbox" name="daily_summary_enabled" id="daily_summary_enabled" class="form-check-input form-check-flat form-check-primary" {{if eq .Configs.daily_summary_enabled "on"}}checked{{end}}>
-                                        <label for="daily_summary_enabled" class="form-check-label">Enable Daily Summary</label>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <!-- Slack Configuration Section -->
-                        <div class="col-md-6 grid-margin stretch-card">
-                            <div class="card mb-4">
-                                <div class="card-body">
-                                    <h4 class="card-title">Slack Configuration</h4>
-                                    <div class="form-group mb-3">
-                                        <label for="slack_app_token" class="form-label">Slack App Token:</label>
-                                        <input type="text" name="slack_app_token" id="slack_app_token" class="form-control" value="{{.Configs.slack_app_token}}">
-                                    </div>
-                                    <div class="form-group mb-3">
-                                        <label for="slack_bot_token" class="form-label">Slack Bot Token:</label>
-                                        <input type="text" name="slack_bot_token" id="slack_bot_token" class="form-control" value="{{.Configs.slack_bot_token}}">
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+<div class="mb-6 flex items-center justify-between">
+  <div></div>
+  <a href="/setup" class="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 transition-colors">
+    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+    Re-run Setup Wizard
+  </a>
+</div>
 
-                        <!-- Zendesk Configuration Section -->
-                        <div class="col-md-6 grid-margin stretch-card">
-                            <div class="card mb-4">
-                                <div class="card-body">
-                                    <h4 class="card-title">Zendesk Configuration</h4>
-                                    <div class="form-group mb-3">
-                                        <label for="zendesk_api_key" class="form-label">Zendesk API Key:</label>
-                                        <input type="text" name="zendesk_api_key" id="zendesk_api_key" class="form-control" value="{{.Configs.zendesk_api_key}}">
-                                    </div>
-                                    <div class="form-group mb-3">
-                                        <label for="zendesk_subdomain" class="form-label">Zendesk Subdomain:</label>
-                                        <input type="text" name="zendesk_subdomain" id="zendesk_subdomain" class="form-control" value="{{.Configs.zendesk_subdomain}}">
-                                    </div>
-                                    <div class="form-group mb-3">
-                                        <label for="zendesk_email" class="form-label">Zendesk Admin Email:</label>
-                                        <input type="email" name="zendesk_email" id="zendesk_email" class="form-control" value="{{.Configs.zendesk_email}}">
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Submit Button -->
-                    <div class="text-end">
-                        <button type="submit" class="btn btn-gradient-primary btn-lg">Save Configuration</button>
-                    </div>
-                </form>
+<form method="POST" action="/admin/configuration" class="space-y-6">
+  {{.CSRFField}}
+  <!-- General Settings -->
+  <div class="bg-white rounded-xl border border-gray-200 shadow-sm">
+    <div class="px-6 py-4 border-b border-gray-100">
+      <h3 class="text-sm font-semibold text-gray-900">General Settings</h3>
+    </div>
+    <div class="p-6">
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" name="daily_summary_enabled" id="daily_summary_enabled" {{if eq .Configs.daily_summary_enabled "on"}}checked{{end}} class="rounded border-gray-300 text-brand-600 focus:ring-brand-500">
+        <span class="text-sm text-gray-700">Enable Daily Summary</span>
+      </label>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Slack Configuration -->
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm">
+      <div class="px-6 py-4 border-b border-gray-100">
+        <h3 class="text-sm font-semibold text-gray-900">Slack Configuration</h3>
+      </div>
+      <div class="p-6 space-y-4">
+        <div>
+          <label for="slack_app_token" class="block text-sm font-medium text-gray-700 mb-1">App Token</label>
+          <input type="password" name="slack_app_token" id="slack_app_token" value="" placeholder="{{if .Configs.slack_app_token}}Value is set (leave blank to keep){{else}}xapp-...{{end}}" autocomplete="off" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none">
+        </div>
+        <div>
+          <label for="slack_bot_token" class="block text-sm font-medium text-gray-700 mb-1">Bot Token</label>
+          <input type="password" name="slack_bot_token" id="slack_bot_token" value="" placeholder="{{if .Configs.slack_bot_token}}Value is set (leave blank to keep){{else}}xoxb-...{{end}}" autocomplete="off" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none">
+        </div>
+      </div>
+    </div>
+
+    <!-- Zendesk Configuration -->
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm">
+      <div class="px-6 py-4 border-b border-gray-100">
+        <h3 class="text-sm font-semibold text-gray-900">Zendesk Configuration</h3>
+      </div>
+      <div class="p-6 space-y-4">
+        <div>
+          <label for="zendesk_api_key" class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+          <input type="password" name="zendesk_api_key" id="zendesk_api_key" value="" placeholder="{{if .Configs.zendesk_api_key}}Value is set (leave blank to keep){{else}}Enter API key{{end}}" autocomplete="off" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none">
+        </div>
+        <div>
+          <label for="zendesk_subdomain" class="block text-sm font-medium text-gray-700 mb-1">Subdomain</label>
+          <input type="text" name="zendesk_subdomain" id="zendesk_subdomain" value="{{.Configs.zendesk_subdomain}}" placeholder="yourcompany" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none">
+        </div>
+        <div>
+          <label for="zendesk_email" class="block text-sm font-medium text-gray-700 mb-1">Admin Email</label>
+          <input type="email" name="zendesk_email" id="zendesk_email" value="{{.Configs.zendesk_email}}" placeholder="admin@yourcompany.com" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flex justify-end">
+    <button type="submit" class="inline-flex items-center px-5 py-2.5 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">Save Configuration</button>
+  </div>
+</form>
 {{end}}

@@ -2,6 +2,8 @@ package logging
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"log/slog"
 	"os"
 	"strings"
@@ -155,17 +157,43 @@ func Debug(area Area, format string, args ...interface{}) {
 	slog.Debug(fmt.Sprintf(format, args...), "area", string(area))
 }
 
-// InitLogger sets up the default slog logger.
+// InitLogger sets up the default slog logger and optionally writes to a file.
 // When format is "json", output is JSON. Otherwise, plain text.
-func InitLogger(format string) {
-	var handler slog.Handler
+// If the LOG_FILE environment variable is set, logs are written to both stdout
+// and the specified file. The returned function closes the log file (if any)
+// and should be deferred by the caller.
+func InitLogger(format string) func() {
+	writer, cleanup := logWriter()
 	opts := &slog.HandlerOptions{Level: slog.LevelDebug}
 
+	var handler slog.Handler
 	if strings.EqualFold(format, "json") {
-		handler = slog.NewJSONHandler(os.Stdout, opts)
+		handler = slog.NewJSONHandler(writer, opts)
 	} else {
-		handler = slog.NewTextHandler(os.Stdout, opts)
+		handler = slog.NewTextHandler(writer, opts)
 	}
 
 	slog.SetDefault(slog.New(handler))
+	log.SetOutput(writer)
+
+	return cleanup
+}
+
+// logWriter returns an io.Writer for log output and a cleanup function.
+// When LOG_FILE is set, it opens the file in append mode and returns an
+// io.MultiWriter that writes to both stdout and the file. Otherwise it
+// returns os.Stdout with a no-op cleanup.
+func logWriter() (io.Writer, func()) {
+	path := os.Getenv("LOG_FILE")
+	if path == "" {
+		return os.Stdout, func() {}
+	}
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to open log file %q: %v (falling back to stdout)\n", path, err)
+		return os.Stdout, func() {}
+	}
+
+	return io.MultiWriter(os.Stdout, f), func() { f.Close() }
 }

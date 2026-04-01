@@ -45,7 +45,8 @@ func main() {
 	loadEnvVariables()
 	database := initDatabase()
 
-	logging.InitLogger(os.Getenv("LOG_FORMAT"))
+	cleanupLogger := logging.InitLogger(os.Getenv("LOG_FORMAT"))
+	defer cleanupLogger()
 	logging.LoadFromEnv()
 
 	enabledAreas := logging.EnabledAreas()

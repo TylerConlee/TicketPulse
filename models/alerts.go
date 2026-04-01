@@ -470,12 +470,12 @@ func GetDailyAlertSummary(ctx context.Context, database db.Database, date string
 	typeRows, err := database.Query(
 		"SELECT alert_type, COUNT(*) as cnt FROM alert_logs WHERE timestamp LIKE ? GROUP BY alert_type ORDER BY cnt DESC", datePrefix)
 	if err == nil {
-		defer typeRows.Close()
 		for typeRows.Next() {
 			var tc DailyAlertTypeCount
 			typeRows.Scan(&tc.AlertType, &tc.Count)
 			summary.ByType = append(summary.ByType, tc)
 		}
+		typeRows.Close()
 	}
 
 	// By channel (join with user_tag_alerts for channel name)
@@ -486,36 +486,36 @@ func GetDailyAlertSummary(ctx context.Context, database db.Database, date string
 		 WHERE al.timestamp LIKE ?
 		 GROUP BY ch ORDER BY cnt DESC`, datePrefix)
 	if err == nil {
-		defer channelRows.Close()
 		for channelRows.Next() {
 			var cc DailyAlertChannelCount
 			channelRows.Scan(&cc.ChannelName, &cc.Count)
 			summary.ByChannel = append(summary.ByChannel, cc)
 		}
+		channelRows.Close()
 	}
 
 	// By tag
 	tagRows, err := database.Query(
 		"SELECT tag, COUNT(*) as cnt FROM alert_logs WHERE timestamp LIKE ? GROUP BY tag ORDER BY cnt DESC LIMIT 10", datePrefix)
 	if err == nil {
-		defer tagRows.Close()
 		for tagRows.Next() {
 			var tc DailyAlertTagCount
 			tagRows.Scan(&tc.Tag, &tc.Count)
 			summary.ByTag = append(summary.ByTag, tc)
 		}
+		tagRows.Close()
 	}
 
 	// Top tickets
 	ticketRows, err := database.Query(
 		"SELECT ticket_id, COUNT(*) as cnt FROM alert_logs WHERE timestamp LIKE ? GROUP BY ticket_id ORDER BY cnt DESC LIMIT 5", datePrefix)
 	if err == nil {
-		defer ticketRows.Close()
 		for ticketRows.Next() {
 			var tt DailyTopTicket
 			ticketRows.Scan(&tt.TicketID, &tt.Count)
 			summary.TopTickets = append(summary.TopTickets, tt)
 		}
+		ticketRows.Close()
 	}
 
 	// Skipped alerts grouped by reason
@@ -523,12 +523,12 @@ func GetDailyAlertSummary(ctx context.Context, database db.Database, date string
 		`SELECT skip_reason, COUNT(*) as cnt FROM skipped_alerts
 		 WHERE created_at LIKE ? GROUP BY skip_reason ORDER BY cnt DESC`, datePrefix)
 	if err == nil {
-		defer skipRows.Close()
 		for skipRows.Next() {
 			var sg DailySkippedGroup
 			skipRows.Scan(&sg.SkipReason, &sg.Count)
 			summary.Skipped = append(summary.Skipped, sg)
 		}
+		skipRows.Close()
 	}
 
 	// Fill in ticket IDs and labels for each skip reason
@@ -538,7 +538,6 @@ func GetDailyAlertSummary(ctx context.Context, database db.Database, date string
 			`SELECT DISTINCT ticket_id, COALESCE(label, '') FROM skipped_alerts
 			 WHERE created_at LIKE ? AND skip_reason = ? LIMIT 20`, datePrefix, reason)
 		if err == nil {
-			defer detailRows.Close()
 			for detailRows.Next() {
 				var tid int64
 				var label string
@@ -548,6 +547,7 @@ func GetDailyAlertSummary(ctx context.Context, database db.Database, date string
 					summary.Skipped[i].Labels = append(summary.Skipped[i].Labels, label)
 				}
 			}
+			detailRows.Close()
 		}
 	}
 

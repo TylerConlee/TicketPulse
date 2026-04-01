@@ -122,7 +122,7 @@
   </div>
 </form>
 
-<script>
+<script nonce="{{.CSPNonce}}">
 var slackChannels = [{{range $i, $ch := .SlackChannels}}{{if $i}},{{end}}{"id":"{{$ch.ID}}","name":"{{$ch.Name}}"}{{end}}];
 
 (function() {

@@ -96,6 +96,13 @@ func InitDB(filepath string) *SQLDatabase {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		log.Printf("Warning: failed to enable WAL mode: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		log.Printf("Warning: failed to set busy timeout: %v", err)
+	}
+
 	sqlDB := &SQLDatabase{DB: db}
 
 	if err := runMigrations(db.DB); err != nil {

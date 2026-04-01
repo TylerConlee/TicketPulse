@@ -3,3 +3,5 @@ users.db
 .env
 TicketPulse
 tmp/
+users.db-shm
+users.db-wal

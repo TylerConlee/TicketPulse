@@ -739,6 +739,288 @@ func TestClearExpiredSLAAlertCache_OnlyOldEntriesRemoved(t *testing.T) {
 	assert.NotNil(t, cached)
 }
 
+// --- SkippedAlert Tests ---
+
+func TestCreateSkippedAlert_Success(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	entry := SkippedAlert{
+		TicketID:   100,
+		UserID:     int64(user.ID),
+		Tag:        "billing",
+		AlertType:  "new_ticket",
+		SkipReason: SkipReasonNewTicketOutsideWindow,
+	}
+	err = CreateSkippedAlert(ctx, database, entry)
+	assert.NoError(t, err)
+}
+
+func TestCreateSkippedAlert_WithMetricAndLabel(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	entry := SkippedAlert{
+		TicketID:   200,
+		UserID:     int64(user.ID),
+		Tag:        "urgent",
+		AlertType:  "sla_reply",
+		SkipReason: SkipReasonSLADuplicate,
+		MetricType: "reply_time",
+		Label:      "Less than 1 hour remaining",
+	}
+	err = CreateSkippedAlert(ctx, database, entry)
+	assert.NoError(t, err)
+}
+
+// --- AcknowledgmentLog Tests ---
+
+func TestCreateAcknowledgmentLog_Success(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	err = CreateAlertLog(ctx, database, AlertLog{
+		UserID:    int64(user.ID),
+		TicketID:  300,
+		Tag:       "billing",
+		AlertType: "new_ticket",
+		Timestamp: "2025-06-15 10:00:00",
+	})
+	require.NoError(t, err)
+
+	alertLog, err := GetMostRecentAlertLogByTicketID(database, 300)
+	require.NoError(t, err)
+
+	entry := AcknowledgmentLog{
+		AlertLogID:    &alertLog.ID,
+		TicketID:      300,
+		SlackUserID:   "U12345",
+		SlackUserName: "testuser",
+	}
+	err = CreateAcknowledgmentLog(ctx, database, entry)
+	assert.NoError(t, err)
+}
+
+func TestCreateAcknowledgmentLog_NilAlertLogID(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	ctx := context.Background()
+	entry := AcknowledgmentLog{
+		AlertLogID:    nil,
+		TicketID:      400,
+		SlackUserID:   "U67890",
+		SlackUserName: "anotheruser",
+	}
+	err := CreateAcknowledgmentLog(ctx, database, entry)
+	assert.NoError(t, err)
+}
+
+// --- DailyAlertLogSent Tests ---
+
+func TestDailyAlertLogSent_CreateAndGet(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	ctx := context.Background()
+	dateStr := "2025-06-15"
+
+	_, err := GetDailyAlertLogSent(ctx, database, dateStr)
+	assert.Error(t, err)
+
+	err = CreateDailyAlertLogSent(ctx, database, dateStr)
+	assert.NoError(t, err)
+
+	entry, err := GetDailyAlertLogSent(ctx, database, dateStr)
+	assert.NoError(t, err)
+	require.NotNil(t, entry)
+	assert.Contains(t, entry.LogDate, dateStr)
+}
+
+func TestDailyAlertLogSent_DuplicateDate(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	ctx := context.Background()
+	dateStr := "2025-06-15"
+
+	err := CreateDailyAlertLogSent(ctx, database, dateStr)
+	require.NoError(t, err)
+
+	err = CreateDailyAlertLogSent(ctx, database, dateStr)
+	assert.Error(t, err)
+}
+
+// --- DailyAlertSummary Tests ---
+
+func TestGetDailyAlertSummary_Empty(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	ctx := context.Background()
+	summary, err := GetDailyAlertSummary(ctx, database, "2025-06-15")
+	assert.NoError(t, err)
+	require.NotNil(t, summary)
+	assert.Equal(t, 0, summary.TotalAlerts)
+	assert.Equal(t, 0, summary.PreviousDay)
+	assert.Empty(t, summary.ByType)
+	assert.Empty(t, summary.ByChannel)
+	assert.Empty(t, summary.ByTag)
+	assert.Empty(t, summary.TopTickets)
+	assert.Empty(t, summary.Skipped)
+	assert.Equal(t, 0, summary.Acknowledgments.TotalAcknowledged)
+}
+
+func TestGetDailyAlertSummary_WithAlertData(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	date := "2025-06-15"
+
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user.ID), TicketID: 100, Tag: "urgent", AlertType: "new_ticket", Timestamp: date + " 10:00:00"})
+	require.NoError(t, err)
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user.ID), TicketID: 101, Tag: "urgent", AlertType: "sla_reply", Timestamp: date + " 11:00:00"})
+	require.NoError(t, err)
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user.ID), TicketID: 100, Tag: "billing", AlertType: "new_ticket", Timestamp: date + " 12:00:00"})
+	require.NoError(t, err)
+
+	summary, err := GetDailyAlertSummary(ctx, database, date)
+	assert.NoError(t, err)
+	require.NotNil(t, summary)
+	assert.Equal(t, 3, summary.TotalAlerts)
+	assert.NotEmpty(t, summary.ByType)
+	assert.NotEmpty(t, summary.ByTag)
+	assert.NotEmpty(t, summary.TopTickets)
+}
+
+func TestGetDailyAlertSummary_WithSkippedAlerts(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	err = CreateSkippedAlert(ctx, database, SkippedAlert{
+		TicketID:   100,
+		UserID:     int64(user.ID),
+		Tag:        "billing",
+		AlertType:  "new_ticket",
+		SkipReason: SkipReasonNewTicketOutsideWindow,
+	})
+	require.NoError(t, err)
+	err = CreateSkippedAlert(ctx, database, SkippedAlert{
+		TicketID:   200,
+		UserID:     int64(user.ID),
+		Tag:        "urgent",
+		AlertType:  "sla_reply",
+		SkipReason: SkipReasonSLADuplicate,
+		MetricType: "reply_time",
+		Label:      "Less than 1h remaining",
+	})
+	require.NoError(t, err)
+
+	date := time.Now().Format("2006-01-02")
+	summary, err := GetDailyAlertSummary(ctx, database, date)
+	assert.NoError(t, err)
+	require.NotNil(t, summary)
+	assert.Len(t, summary.Skipped, 2)
+}
+
+func TestGetDailyAlertSummary_PreviousDayTrend(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user.ID), TicketID: 100, Tag: "urgent", AlertType: "new_ticket", Timestamp: "2025-06-14 10:00:00"})
+	require.NoError(t, err)
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user.ID), TicketID: 101, Tag: "urgent", AlertType: "new_ticket", Timestamp: "2025-06-14 11:00:00"})
+	require.NoError(t, err)
+
+	err = CreateAlertLog(ctx, database, AlertLog{UserID: int64(user.ID), TicketID: 200, Tag: "billing", AlertType: "sla_reply", Timestamp: "2025-06-15 10:00:00"})
+	require.NoError(t, err)
+
+	summary, err := GetDailyAlertSummary(ctx, database, "2025-06-15")
+	assert.NoError(t, err)
+	require.NotNil(t, summary)
+	assert.Equal(t, 1, summary.TotalAlerts)
+	assert.Equal(t, 2, summary.PreviousDay)
+}
+
+// --- Cleanup Tests ---
+
+func TestClearOldSkippedAlerts(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	err := CreateUser(database, "test@example.com", "Test User", AdminRole, false)
+	require.NoError(t, err)
+	user, err := GetUserByEmail(database, "test@example.com")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	err = CreateSkippedAlert(ctx, database, SkippedAlert{
+		TicketID:   100,
+		UserID:     int64(user.ID),
+		Tag:        "billing",
+		AlertType:  "new_ticket",
+		SkipReason: SkipReasonNewTicketOutsideWindow,
+	})
+	require.NoError(t, err)
+
+	err = ClearOldSkippedAlerts(ctx, database, 30)
+	assert.NoError(t, err)
+}
+
+func TestClearOldAcknowledgmentLogs(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	ctx := context.Background()
+	err := CreateAcknowledgmentLog(ctx, database, AcknowledgmentLog{
+		TicketID:      100,
+		SlackUserID:   "U123",
+		SlackUserName: "testuser",
+	})
+	require.NoError(t, err)
+
+	err = ClearOldAcknowledgmentLogs(ctx, database, 30)
+	assert.NoError(t, err)
+}
+
 func TestGetAlertHistoryPaginated_OrderedByTimestampDesc(t *testing.T) {
 	database := setupTestDB(t)
 	defer database.Close()

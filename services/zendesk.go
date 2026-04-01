@@ -204,10 +204,27 @@ func processTickets(ctx context.Context, db db.Database, tickets []zendesk.Ticke
 			if isNewTicket(ticket) {
 				logging.Debug(logging.AreaPolling, "Ticket #%d: new_ticket -> sending alert", ticket.ID)
 				sendGenericAlert(ctx, db, alert, ticket, slaData, slackService, zc)
+			} else {
+				models.CreateSkippedAlert(ctx, db, models.SkippedAlert{
+					TicketID:   int64(ticket.ID),
+					UserID:     int64(alert.User.ID),
+					Tag:        alert.Tag,
+					AlertType:  alert.AlertType,
+					SkipReason: models.SkipReasonNewTicketOutsideWindow,
+				})
 			}
 		case AlertTypeTicketUpdate:
-			if shouldSendUpdateAlert(ticket, pollingState, zc) {
+			skipReason := shouldSendUpdateAlertWithReason(ticket, pollingState, zc)
+			if skipReason == "" {
 				sendGenericAlert(ctx, db, alert, ticket, slaData, slackService, zc)
+			} else {
+				models.CreateSkippedAlert(ctx, db, models.SkippedAlert{
+					TicketID:   int64(ticket.ID),
+					UserID:     int64(alert.User.ID),
+					Tag:        alert.Tag,
+					AlertType:  alert.AlertType,
+					SkipReason: skipReason,
+				})
 			}
 		case AlertTypeSLABreach, AlertTypeSLAReply, AlertTypeSLAResolution:
 			handleSLAAlerts(ctx, db, alert, ticket, slaData, slackService, zc)
@@ -247,26 +264,32 @@ func matchAlertsForTicket(ticket zendesk.Ticket, tagIndex map[string][]models.Ta
 }
 
 func shouldSendUpdateAlert(ticket zendesk.Ticket, pollingState *PollingState, zc *ZendeskClient) bool {
+	return shouldSendUpdateAlertWithReason(ticket, pollingState, zc) == ""
+}
+
+// shouldSendUpdateAlertWithReason returns an empty string if the alert should
+// be sent, or a skip reason constant if it should be skipped.
+func shouldSendUpdateAlertWithReason(ticket zendesk.Ticket, pollingState *PollingState, zc *ZendeskClient) string {
 	if !isUpdatedTicket(ticket, pollingState.lastPollTime) {
 		logging.Debug(logging.AreaPolling, "Ticket #%d: ticket_update -> not updated since lastPoll=%s",
 			ticket.ID, pollingState.lastPollTime.Format(time.RFC3339))
-		return false
+		return models.SkipReasonUpdateNotModified
 	}
 
 	lastPublicCommentTime, isEndUser, err := zc.GetLastPublicCommentTime(ticket.ID)
 	if err != nil {
 		log.Printf("Skipping ticket %d: %v", ticket.ID, err)
-		return false
+		return models.SkipReasonUpdateNoEndUserComment
 	}
 
 	if lastPublicCommentTime.After(pollingState.lastPollTime) && isEndUser {
 		logging.Debug(logging.AreaPolling, "Ticket #%d: ticket_update -> sendAlert=true (comment at %s by end-user)",
 			ticket.ID, lastPublicCommentTime.Format(time.RFC3339))
-		return true
+		return ""
 	}
 
 	log.Printf("Skipping ticket update for #%d - no new comment from end user", ticket.ID)
-	return false
+	return models.SkipReasonUpdateNoEndUserComment
 }
 
 func sendGenericAlert(ctx context.Context, database db.Database, alert models.TagAlert, ticket zendesk.Ticket, slaData map[int64]SLAInfo, slackService *SlackService, zc *ZendeskClient) {
@@ -308,6 +331,18 @@ func handleSLAAlerts(ctx context.Context, database db.Database, alert models.Tag
 			ticket.ID, i, metric.Metric, metric.Stage, matches, label, metricType)
 
 		if !matches {
+			skipReason := models.SkipReasonSLAStageInactive
+			if metric.Stage == "active" {
+				skipReason = models.SkipReasonSLAMetricMismatch
+			}
+			models.CreateSkippedAlert(ctx, database, models.SkippedAlert{
+				TicketID:   int64(ticket.ID),
+				UserID:     int64(alert.User.ID),
+				Tag:        alert.Tag,
+				AlertType:  alert.AlertType,
+				SkipReason: skipReason,
+				MetricType: metric.Metric,
+			})
 			continue
 		}
 
@@ -321,6 +356,15 @@ func handleSLAAlerts(ctx context.Context, database db.Database, alert models.Tag
 		if !useOldAlertType && alert.AlertType != alertType {
 			logging.Debug(logging.AreaSLA, "Ticket #%d: metric[%d] skipped: user wants %q but metric maps to %q",
 				ticket.ID, i, alert.AlertType, alertType)
+			models.CreateSkippedAlert(ctx, database, models.SkippedAlert{
+				TicketID:   int64(ticket.ID),
+				UserID:     int64(alert.User.ID),
+				Tag:        alert.Tag,
+				AlertType:  alert.AlertType,
+				SkipReason: models.SkipReasonSLAMetricMismatch,
+				MetricType: metricType,
+				Label:      label,
+			})
 			continue
 		}
 
@@ -373,6 +417,15 @@ func isDuplicateSLAAlert(ctx context.Context, database db.Database, alert models
 	if existingAlert.Label == label {
 		logging.Debug(logging.AreaCache, "Ticket #%d: cache hit, same label=%q -> SKIPPING (dedup)",
 			ticket.ID, label)
+		models.CreateSkippedAlert(ctx, database, models.SkippedAlert{
+			TicketID:   int64(ticket.ID),
+			UserID:     int64(alert.User.ID),
+			Tag:        alert.Tag,
+			AlertType:  alertType,
+			SkipReason: models.SkipReasonSLADuplicate,
+			MetricType: metricType,
+			Label:      label,
+		})
 		return true
 	}
 

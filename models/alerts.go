@@ -326,3 +326,262 @@ func GetAlertHistoryPaginated(db db.Database, userID, limit, offset int) ([]Aler
 	}
 	return logs, total, nil
 }
+
+// --- Skipped Alerts ---
+
+const (
+	SkipReasonSLADuplicate          = "sla_duplicate"
+	SkipReasonNewTicketOutsideWindow = "new_ticket_outside_window"
+	SkipReasonUpdateNoEndUserComment = "update_no_end_user_comment"
+	SkipReasonUpdateNotModified      = "update_not_modified"
+	SkipReasonSLAMetricMismatch      = "sla_metric_mismatch"
+	SkipReasonSLAStageInactive       = "sla_stage_inactive"
+)
+
+type SkippedAlert struct {
+	ID         int64  `db:"id"`
+	TicketID   int64  `db:"ticket_id"`
+	UserID     int64  `db:"user_id"`
+	Tag        string `db:"tag"`
+	AlertType  string `db:"alert_type"`
+	SkipReason string `db:"skip_reason"`
+	MetricType string `db:"metric_type"`
+	Label      string `db:"label"`
+	CreatedAt  string `db:"created_at"`
+}
+
+func CreateSkippedAlert(ctx context.Context, db db.Database, entry SkippedAlert) error {
+	query := `INSERT INTO skipped_alerts (ticket_id, user_id, tag, alert_type, skip_reason, metric_type, label) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	_, err := db.ExecContext(ctx, query, entry.TicketID, entry.UserID, entry.Tag, entry.AlertType, entry.SkipReason, entry.MetricType, entry.Label)
+	if err != nil {
+		return fmt.Errorf("failed to create skipped alert: %w", err)
+	}
+	return nil
+}
+
+// --- Acknowledgment Logs ---
+
+type AcknowledgmentLog struct {
+	ID             int64  `db:"id"`
+	AlertLogID     *int64 `db:"alert_log_id"`
+	TicketID       int64  `db:"ticket_id"`
+	SlackUserID    string `db:"slack_user_id"`
+	SlackUserName  string `db:"slack_user_name"`
+	AcknowledgedAt string `db:"acknowledged_at"`
+}
+
+func CreateAcknowledgmentLog(ctx context.Context, db db.Database, entry AcknowledgmentLog) error {
+	query := `INSERT INTO acknowledgment_logs (alert_log_id, ticket_id, slack_user_id, slack_user_name) VALUES (?, ?, ?, ?)`
+	_, err := db.ExecContext(ctx, query, entry.AlertLogID, entry.TicketID, entry.SlackUserID, entry.SlackUserName)
+	if err != nil {
+		return fmt.Errorf("failed to create acknowledgment log: %w", err)
+	}
+	return nil
+}
+
+// --- Daily Alert Log Sent dedup ---
+
+type DailyAlertLogSent struct {
+	ID        int64  `db:"id"`
+	LogDate   string `db:"log_date"`
+	CreatedAt string `db:"created_at"`
+}
+
+func GetDailyAlertLogSent(ctx context.Context, db db.Database, logDate string) (*DailyAlertLogSent, error) {
+	var entry DailyAlertLogSent
+	query := `SELECT id, log_date, created_at FROM daily_alert_log_sent WHERE log_date = ?`
+	err := db.QueryRowContext(ctx, query, logDate).Scan(&entry.ID, &entry.LogDate, &entry.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &entry, nil
+}
+
+func CreateDailyAlertLogSent(ctx context.Context, db db.Database, logDate string) error {
+	query := `INSERT INTO daily_alert_log_sent (log_date) VALUES (?)`
+	_, err := db.ExecContext(ctx, query, logDate)
+	if err != nil {
+		return fmt.Errorf("failed to create daily alert log sent entry: %w", err)
+	}
+	return nil
+}
+
+// --- Daily Alert Stats queries ---
+
+type DailyAlertTypeCount struct {
+	AlertType string
+	Count     int
+}
+
+type DailyAlertChannelCount struct {
+	ChannelName string
+	Count       int
+}
+
+type DailyAlertTagCount struct {
+	Tag   string
+	Count int
+}
+
+type DailyTopTicket struct {
+	TicketID int64
+	Count    int
+}
+
+type DailySkippedGroup struct {
+	SkipReason string
+	Count      int
+	TicketIDs  []int64
+	Labels     []string
+}
+
+type DailyAckStats struct {
+	TotalAcknowledged int
+	AvgAckSeconds     float64
+}
+
+type DailyAlertSummary struct {
+	TotalAlerts    int
+	PreviousDay    int
+	ByType         []DailyAlertTypeCount
+	ByChannel      []DailyAlertChannelCount
+	ByTag          []DailyAlertTagCount
+	TopTickets     []DailyTopTicket
+	Skipped        []DailySkippedGroup
+	Acknowledgments DailyAckStats
+}
+
+func GetDailyAlertSummary(ctx context.Context, database db.Database, date string) (*DailyAlertSummary, error) {
+	summary := &DailyAlertSummary{}
+	datePrefix := date + "%"
+
+	database.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM alert_logs WHERE timestamp LIKE ?", datePrefix).Scan(&summary.TotalAlerts)
+
+	// Previous day count for trend
+	prev, err := time.Parse("2006-01-02", date)
+	if err == nil {
+		prevDate := prev.AddDate(0, 0, -1).Format("2006-01-02")
+		database.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM alert_logs WHERE timestamp LIKE ?", prevDate+"%").Scan(&summary.PreviousDay)
+	}
+
+	// By type
+	typeRows, err := database.Query(
+		"SELECT alert_type, COUNT(*) as cnt FROM alert_logs WHERE timestamp LIKE ? GROUP BY alert_type ORDER BY cnt DESC", datePrefix)
+	if err == nil {
+		defer typeRows.Close()
+		for typeRows.Next() {
+			var tc DailyAlertTypeCount
+			typeRows.Scan(&tc.AlertType, &tc.Count)
+			summary.ByType = append(summary.ByType, tc)
+		}
+	}
+
+	// By channel (join with user_tag_alerts for channel name)
+	channelRows, err := database.Query(
+		`SELECT COALESCE(uta.slack_channel_name, uta.slack_channel_id) as ch, COUNT(*) as cnt
+		 FROM alert_logs al
+		 INNER JOIN user_tag_alerts uta ON al.user_id = uta.user_id AND al.tag = uta.tag AND al.alert_type = uta.alert_type
+		 WHERE al.timestamp LIKE ?
+		 GROUP BY ch ORDER BY cnt DESC`, datePrefix)
+	if err == nil {
+		defer channelRows.Close()
+		for channelRows.Next() {
+			var cc DailyAlertChannelCount
+			channelRows.Scan(&cc.ChannelName, &cc.Count)
+			summary.ByChannel = append(summary.ByChannel, cc)
+		}
+	}
+
+	// By tag
+	tagRows, err := database.Query(
+		"SELECT tag, COUNT(*) as cnt FROM alert_logs WHERE timestamp LIKE ? GROUP BY tag ORDER BY cnt DESC LIMIT 10", datePrefix)
+	if err == nil {
+		defer tagRows.Close()
+		for tagRows.Next() {
+			var tc DailyAlertTagCount
+			tagRows.Scan(&tc.Tag, &tc.Count)
+			summary.ByTag = append(summary.ByTag, tc)
+		}
+	}
+
+	// Top tickets
+	ticketRows, err := database.Query(
+		"SELECT ticket_id, COUNT(*) as cnt FROM alert_logs WHERE timestamp LIKE ? GROUP BY ticket_id ORDER BY cnt DESC LIMIT 5", datePrefix)
+	if err == nil {
+		defer ticketRows.Close()
+		for ticketRows.Next() {
+			var tt DailyTopTicket
+			ticketRows.Scan(&tt.TicketID, &tt.Count)
+			summary.TopTickets = append(summary.TopTickets, tt)
+		}
+	}
+
+	// Skipped alerts grouped by reason
+	skipRows, err := database.Query(
+		`SELECT skip_reason, COUNT(*) as cnt FROM skipped_alerts
+		 WHERE created_at LIKE ? GROUP BY skip_reason ORDER BY cnt DESC`, datePrefix)
+	if err == nil {
+		defer skipRows.Close()
+		for skipRows.Next() {
+			var sg DailySkippedGroup
+			skipRows.Scan(&sg.SkipReason, &sg.Count)
+			summary.Skipped = append(summary.Skipped, sg)
+		}
+	}
+
+	// Fill in ticket IDs and labels for each skip reason
+	for i := range summary.Skipped {
+		reason := summary.Skipped[i].SkipReason
+		detailRows, err := database.Query(
+			`SELECT DISTINCT ticket_id, COALESCE(label, '') FROM skipped_alerts
+			 WHERE created_at LIKE ? AND skip_reason = ? LIMIT 20`, datePrefix, reason)
+		if err == nil {
+			defer detailRows.Close()
+			for detailRows.Next() {
+				var tid int64
+				var label string
+				detailRows.Scan(&tid, &label)
+				summary.Skipped[i].TicketIDs = append(summary.Skipped[i].TicketIDs, tid)
+				if label != "" {
+					summary.Skipped[i].Labels = append(summary.Skipped[i].Labels, label)
+				}
+			}
+		}
+	}
+
+	// Acknowledgment stats
+	database.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM acknowledgment_logs WHERE acknowledged_at LIKE ?", datePrefix).Scan(&summary.Acknowledgments.TotalAcknowledged)
+
+	// Average ack time: seconds between alert_logs.timestamp and acknowledgment_logs.acknowledged_at
+	database.QueryRowContext(ctx,
+		`SELECT COALESCE(AVG(
+			(julianday(ak.acknowledged_at) - julianday(al.timestamp)) * 86400
+		), 0) FROM acknowledgment_logs ak
+		INNER JOIN alert_logs al ON ak.alert_log_id = al.id
+		WHERE ak.acknowledged_at LIKE ?`, datePrefix).Scan(&summary.Acknowledgments.AvgAckSeconds)
+
+	return summary, nil
+}
+
+// ClearOldSkippedAlerts removes skipped_alerts entries older than the given number of days.
+func ClearOldSkippedAlerts(ctx context.Context, db db.Database, days int) error {
+	query := fmt.Sprintf("DELETE FROM skipped_alerts WHERE created_at < datetime('now', '-%d days')", days)
+	_, err := db.ExecContext(ctx, query)
+	if err != nil {
+		return fmt.Errorf("failed to clear old skipped alerts: %w", err)
+	}
+	return nil
+}
+
+// ClearOldAcknowledgmentLogs removes acknowledgment_logs entries older than the given number of days.
+func ClearOldAcknowledgmentLogs(ctx context.Context, db db.Database, days int) error {
+	query := fmt.Sprintf("DELETE FROM acknowledgment_logs WHERE acknowledged_at < datetime('now', '-%d days')", days)
+	_, err := db.ExecContext(ctx, query)
+	if err != nil {
+		return fmt.Errorf("failed to clear old acknowledgment logs: %w", err)
+	}
+	return nil
+}

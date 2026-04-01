@@ -114,7 +114,7 @@ func main() {
 
 		app.SlackService = slackService
 		app.DashboardService = services.NewDashboardService(database)
-		app.SchedulerService = services.NewSchedulerService(database, slackService)
+		app.SchedulerService = services.NewSchedulerService(database, slackService, configCache)
 
 		go slackService.StartSocketMode(ctx)
 
@@ -456,5 +456,7 @@ func (app *App) setupAdminRoutes(protected *mux.Router, appHandler *handlers.App
 	admin.HandleFunc("/users/new", appHandler.NewUserHandler).Methods("GET", "POST")
 	admin.HandleFunc("/tags", appHandler.TagManagementHandler).Methods("GET")
 	admin.HandleFunc("/tag/delete/{id}", appHandler.DeleteTagAlertHandler).Methods("POST")
-	admin.HandleFunc("/configuration", appHandler.ConfigurationHandler).Methods("GET", "POST")
+	admin.HandleFunc("/configuration", func(w http.ResponseWriter, r *http.Request) {
+		appHandler.ConfigurationHandler(w, r, app.SlackService)
+	}).Methods("GET", "POST")
 }

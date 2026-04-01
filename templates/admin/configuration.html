@@ -22,6 +22,61 @@
     </div>
   </div>
 
+  <!-- Daily Alert Log -->
+  <div class="bg-white rounded-xl border border-gray-200 shadow-sm">
+    <div class="px-6 py-4 border-b border-gray-100">
+      <h3 class="text-sm font-semibold text-gray-900">Daily Alert Log</h3>
+      <p class="text-xs text-gray-500 mt-1">Post a daily summary of all alert activity to a Slack channel.</p>
+    </div>
+    <div class="p-6 space-y-4">
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" name="daily_alert_log_enabled" id="daily_alert_log_enabled" {{if eq .Configs.daily_alert_log_enabled "on"}}checked{{end}} class="rounded border-gray-300 text-brand-600 focus:ring-brand-500">
+        <span class="text-sm text-gray-700">Enable Daily Alert Log</span>
+      </label>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Slack Channel</label>
+          <div class="channel-combobox relative" data-selected-id="{{.Configs.daily_alert_log_channel_id}}" data-selected-name="{{.Configs.daily_alert_log_channel_name}}">
+            <input type="hidden" name="daily_alert_log_channel_id" value="{{.Configs.daily_alert_log_channel_id}}">
+            <input type="hidden" name="daily_alert_log_channel_name" id="dal_channel_name" value="{{.Configs.daily_alert_log_channel_name}}">
+            <input type="text" autocomplete="off" class="channel-search-input w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none bg-white" placeholder="Search channels..." value="{{if .Configs.daily_alert_log_channel_name}}#{{.Configs.daily_alert_log_channel_name}}{{end}}">
+            <div class="channel-dropdown hidden absolute z-20 mt-1 w-full bg-white rounded-lg border border-gray-200 shadow-lg max-h-48 overflow-y-auto"></div>
+          </div>
+        </div>
+        <div>
+          <label for="daily_alert_log_time" class="block text-sm font-medium text-gray-700 mb-1">Post Time</label>
+          <input type="time" name="daily_alert_log_time" id="daily_alert_log_time" value="{{.Configs.daily_alert_log_time}}" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none">
+        </div>
+      </div>
+      <div>
+        <label for="daily_alert_log_timezone" class="block text-sm font-medium text-gray-700 mb-1">Timezone</label>
+        <select name="daily_alert_log_timezone" id="daily_alert_log_timezone" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none bg-white">
+          {{$tz := .Configs.daily_alert_log_timezone}}
+          <option value="UTC" {{if or (eq $tz "") (eq $tz "UTC")}}selected{{end}}>UTC</option>
+          <option value="America/New_York" {{if eq $tz "America/New_York"}}selected{{end}}>America/New_York (Eastern)</option>
+          <option value="America/Chicago" {{if eq $tz "America/Chicago"}}selected{{end}}>America/Chicago (Central)</option>
+          <option value="America/Denver" {{if eq $tz "America/Denver"}}selected{{end}}>America/Denver (Mountain)</option>
+          <option value="America/Los_Angeles" {{if eq $tz "America/Los_Angeles"}}selected{{end}}>America/Los_Angeles (Pacific)</option>
+          <option value="America/Anchorage" {{if eq $tz "America/Anchorage"}}selected{{end}}>America/Anchorage (Alaska)</option>
+          <option value="Pacific/Honolulu" {{if eq $tz "Pacific/Honolulu"}}selected{{end}}>Pacific/Honolulu (Hawaii)</option>
+          <option value="America/Toronto" {{if eq $tz "America/Toronto"}}selected{{end}}>America/Toronto (Eastern CA)</option>
+          <option value="America/Vancouver" {{if eq $tz "America/Vancouver"}}selected{{end}}>America/Vancouver (Pacific CA)</option>
+          <option value="Europe/London" {{if eq $tz "Europe/London"}}selected{{end}}>Europe/London (GMT/BST)</option>
+          <option value="Europe/Berlin" {{if eq $tz "Europe/Berlin"}}selected{{end}}>Europe/Berlin (CET)</option>
+          <option value="Europe/Paris" {{if eq $tz "Europe/Paris"}}selected{{end}}>Europe/Paris (CET)</option>
+          <option value="Europe/Amsterdam" {{if eq $tz "Europe/Amsterdam"}}selected{{end}}>Europe/Amsterdam (CET)</option>
+          <option value="Asia/Tokyo" {{if eq $tz "Asia/Tokyo"}}selected{{end}}>Asia/Tokyo (JST)</option>
+          <option value="Asia/Shanghai" {{if eq $tz "Asia/Shanghai"}}selected{{end}}>Asia/Shanghai (CST)</option>
+          <option value="Asia/Kolkata" {{if eq $tz "Asia/Kolkata"}}selected{{end}}>Asia/Kolkata (IST)</option>
+          <option value="Asia/Singapore" {{if eq $tz "Asia/Singapore"}}selected{{end}}>Asia/Singapore (SGT)</option>
+          <option value="Australia/Sydney" {{if eq $tz "Australia/Sydney"}}selected{{end}}>Australia/Sydney (AEST)</option>
+          <option value="Australia/Melbourne" {{if eq $tz "Australia/Melbourne"}}selected{{end}}>Australia/Melbourne (AEST)</option>
+          <option value="Pacific/Auckland" {{if eq $tz "Pacific/Auckland"}}selected{{end}}>Pacific/Auckland (NZST)</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <!-- Slack Configuration -->
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm">
@@ -66,4 +121,96 @@
     <button type="submit" class="inline-flex items-center px-5 py-2.5 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">Save Configuration</button>
   </div>
 </form>
+
+<script>
+var slackChannels = [{{range $i, $ch := .SlackChannels}}{{if $i}},{{end}}{"id":"{{$ch.ID}}","name":"{{$ch.Name}}"}{{end}}];
+
+(function() {
+  function renderDropdown(dropdown, channels, onSelect) {
+    dropdown.innerHTML = '';
+    if (channels.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'px-3 py-2 text-sm text-gray-400';
+      empty.textContent = 'No channels found';
+      dropdown.appendChild(empty);
+    } else {
+      channels.forEach(function(ch) {
+        var item = document.createElement('div');
+        item.className = 'px-3 py-2 text-sm cursor-pointer hover:bg-brand-50 hover:text-brand-700 transition-colors';
+        item.textContent = '#' + ch.name;
+        item.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          onSelect(ch);
+        });
+        dropdown.appendChild(item);
+      });
+    }
+    dropdown.classList.remove('hidden');
+  }
+
+  function filterChannels(query) {
+    if (!query) return slackChannels.slice(0, 30);
+    var q = query.toLowerCase().replace(/^#/, '');
+    return slackChannels.filter(function(ch) {
+      return ch.name.toLowerCase().indexOf(q) !== -1;
+    }).slice(0, 30);
+  }
+
+  function initComboboxes() {
+    document.querySelectorAll('.channel-combobox').forEach(function(wrapper) {
+      var hiddenInput = wrapper.querySelector('input[name$="channel_id"]');
+      var nameInput = wrapper.querySelector('input[name$="channel_name"]');
+      var searchInput = wrapper.querySelector('.channel-search-input');
+      var dropdown = wrapper.querySelector('.channel-dropdown');
+
+      function selectChannel(ch) {
+        hiddenInput.value = ch.id;
+        if (nameInput) nameInput.value = ch.name;
+        searchInput.value = '#' + ch.name;
+        dropdown.classList.add('hidden');
+      }
+
+      searchInput.addEventListener('focus', function() {
+        searchInput.select();
+        renderDropdown(dropdown, filterChannels(searchInput.value), selectChannel);
+      });
+
+      searchInput.addEventListener('input', function() {
+        hiddenInput.value = '';
+        if (nameInput) nameInput.value = '';
+        renderDropdown(dropdown, filterChannels(searchInput.value), selectChannel);
+      });
+
+      searchInput.addEventListener('blur', function() {
+        setTimeout(function() {
+          dropdown.classList.add('hidden');
+          if (!hiddenInput.value && searchInput.value) {
+            var exact = slackChannels.find(function(ch) {
+              return ch.name.toLowerCase() === searchInput.value.toLowerCase().replace(/^#/, '');
+            });
+            if (exact) {
+              selectChannel(exact);
+            } else {
+              searchInput.value = '';
+            }
+          }
+        }, 150);
+      });
+
+      searchInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          dropdown.classList.add('hidden');
+          searchInput.blur();
+        }
+      });
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initComboboxes);
+  } else {
+    initComboboxes();
+  }
+})();
+</script>
 {{end}}

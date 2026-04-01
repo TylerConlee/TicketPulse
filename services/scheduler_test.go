@@ -63,7 +63,7 @@ func TestNewSchedulerService(t *testing.T) {
 	database := setupSchedulerTestDB(t)
 	defer database.Close()
 
-	service := NewSchedulerService(database, nil)
+	service := NewSchedulerService(database, nil, nil)
 
 	assert.NotNil(t, service)
 	assert.Equal(t, database, service.db)
@@ -76,7 +76,7 @@ func TestNewSchedulerService_WithSlackService(t *testing.T) {
 
 	// Note: We can't easily create a real SlackService without network access,
 	// so we just test that the constructor works with nil for now
-	service := NewSchedulerService(database, nil)
+	service := NewSchedulerService(database, nil, nil)
 
 	assert.NotNil(t, service)
 }

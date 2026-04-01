@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/TylerConlee/TicketPulse/models"
+	"github.com/TylerConlee/TicketPulse/services"
 )
 
 const sensitiveValuePlaceholder = "********"
@@ -22,7 +23,7 @@ func maskSensitiveValue(value string) string {
 }
 
 // ConfigurationHandler handles the configuration management page.
-func (h *AppHandler) ConfigurationHandler(w http.ResponseWriter, r *http.Request) {
+func (h *AppHandler) ConfigurationHandler(w http.ResponseWriter, r *http.Request, slackService *services.SlackService) {
 	if r.Method == "POST" {
 		err := h.saveConfigurationSettings(r)
 		if err != nil {
@@ -62,6 +63,7 @@ func (h *AppHandler) ConfigurationHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	data["Configs"] = maskedConfigs
+	data["SlackChannels"] = buildChannelList(slackService)
 
 	h.renderTemplate(w, "templates/admin/configuration.html", data)
 }
@@ -70,12 +72,17 @@ func (h *AppHandler) ConfigurationHandler(w http.ResponseWriter, r *http.Request
 // Sensitive values that match the placeholder are skipped (user didn't change them).
 func (h *AppHandler) saveConfigurationSettings(r *http.Request) error {
 	configs := map[string]string{
-		"daily_summary_enabled": r.FormValue("daily_summary_enabled"),
-		"slack_app_token":       r.FormValue("slack_app_token"),
-		"slack_bot_token":       r.FormValue("slack_bot_token"),
-		"zendesk_api_key":       r.FormValue("zendesk_api_key"),
-		"zendesk_subdomain":     r.FormValue("zendesk_subdomain"),
-		"zendesk_email":         r.FormValue("zendesk_email"),
+		"daily_summary_enabled":        r.FormValue("daily_summary_enabled"),
+		"slack_app_token":              r.FormValue("slack_app_token"),
+		"slack_bot_token":              r.FormValue("slack_bot_token"),
+		"zendesk_api_key":              r.FormValue("zendesk_api_key"),
+		"zendesk_subdomain":            r.FormValue("zendesk_subdomain"),
+		"zendesk_email":                r.FormValue("zendesk_email"),
+		"daily_alert_log_enabled":      r.FormValue("daily_alert_log_enabled"),
+		"daily_alert_log_channel_id":   r.FormValue("daily_alert_log_channel_id"),
+		"daily_alert_log_channel_name": r.FormValue("daily_alert_log_channel_name"),
+		"daily_alert_log_time":         r.FormValue("daily_alert_log_time"),
+		"daily_alert_log_timezone":     r.FormValue("daily_alert_log_timezone"),
 	}
 
 	for key, value := range configs {

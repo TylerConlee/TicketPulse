@@ -318,7 +318,7 @@ func TestNewSchedulerService(t *testing.T) {
 	database := setupDailySummaryTestDB(t)
 	defer database.Close()
 
-	scheduler := services.NewSchedulerService(database, nil)
+	scheduler := services.NewSchedulerService(database, nil, nil)
 	assert.NotNil(t, scheduler)
 }
 

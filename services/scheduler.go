@@ -16,13 +16,15 @@ import (
 type SchedulerService struct {
 	db           db.Database
 	slackService *SlackService
+	configCache  *ConfigCache
 }
 
 // NewSchedulerService creates a new scheduler service
-func NewSchedulerService(db db.Database, slackService *SlackService) *SchedulerService {
+func NewSchedulerService(db db.Database, slackService *SlackService, configCache *ConfigCache) *SchedulerService {
 	return &SchedulerService{
 		db:           db,
 		slackService: slackService,
+		configCache:  configCache,
 	}
 }
 
@@ -48,8 +50,12 @@ func (s *SchedulerService) StartScheduler(ctx context.Context) {
 			if err := s.checkAndSendSummaries(ctx); err != nil {
 				log.Printf("Error checking for daily summaries: %v", err)
 			}
+			if err := s.checkAndSendDailyAlertLog(ctx); err != nil {
+				log.Printf("Error checking for daily alert log: %v", err)
+			}
 		case <-tagCacheTicker.C:
 			s.refreshTagCache()
+			s.cleanupOldAlertData(ctx)
 		}
 	}
 }
@@ -196,6 +202,74 @@ func (s *SchedulerService) sendDailySummary(ctx context.Context, user models.Use
 
 	log.Printf("Daily summary sent to user %s", user.Email)
 	return nil
+}
+
+// checkAndSendDailyAlertLog checks if the daily alert log should be sent.
+func (s *SchedulerService) checkAndSendDailyAlertLog(ctx context.Context) error {
+	if s.configCache == nil {
+		return nil
+	}
+
+	enabled, err := s.configCache.Get("daily_alert_log_enabled")
+	if err != nil || enabled != "on" {
+		return nil
+	}
+
+	channelID, err := s.configCache.Get("daily_alert_log_channel_id")
+	if err != nil || channelID == "" {
+		return nil
+	}
+
+	targetTime, err := s.configCache.Get("daily_alert_log_time")
+	if err != nil || targetTime == "" {
+		return nil
+	}
+
+	tz, err := s.configCache.Get("daily_alert_log_timezone")
+	if err != nil || tz == "" {
+		tz = "UTC"
+	}
+
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		log.Printf("Invalid daily alert log timezone %q: %v", tz, err)
+		return nil
+	}
+
+	nowInTZ := time.Now().In(loc)
+
+	parsedTarget, err := time.Parse("15:04", targetTime)
+	if err != nil {
+		log.Printf("Invalid daily alert log time %q: %v", targetTime, err)
+		return nil
+	}
+
+	currentMinutes := nowInTZ.Hour()*60 + nowInTZ.Minute()
+	targetMinutes := parsedTarget.Hour()*60 + parsedTarget.Minute()
+
+	timeDiff := currentMinutes - targetMinutes
+	if timeDiff < 0 {
+		timeDiff = -timeDiff
+	}
+
+	if timeDiff > 1 {
+		return nil
+	}
+
+	logging.Debug(logging.AreaScheduler, "Daily alert log: time match (current=%02d:%02d target=%s tz=%s), sending...",
+		nowInTZ.Hour(), nowInTZ.Minute(), targetTime, tz)
+
+	return sendDailyAlertLog(ctx, s.db, s.slackService, s.configCache)
+}
+
+func (s *SchedulerService) cleanupOldAlertData(ctx context.Context) {
+	const retentionDays = 30
+	if err := models.ClearOldSkippedAlerts(ctx, s.db, retentionDays); err != nil {
+		log.Printf("Failed to clean up old skipped alerts: %v", err)
+	}
+	if err := models.ClearOldAcknowledgmentLogs(ctx, s.db, retentionDays); err != nil {
+		log.Printf("Failed to clean up old acknowledgment logs: %v", err)
+	}
 }
 
 // refreshTagCache fetches all tags from Zendesk and stores them in the cache table.

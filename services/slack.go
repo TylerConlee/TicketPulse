@@ -273,9 +273,24 @@ func (s *SlackService) HandleAcknowledge(callback slack.InteractionCallback) {
 		))
 	}
 
-	_, _, _, err := s.client.UpdateMessage(callback.Channel.ID, callback.Message.Timestamp, slack.MsgOptionBlocks(newBlocks...))
-	if err != nil {
-		log.Printf("Failed to update message in channel %s at %s: %v", callback.Channel.ID, callback.Message.Timestamp, err)
+	_, _, _, updateErr := s.client.UpdateMessage(callback.Channel.ID, callback.Message.Timestamp, slack.MsgOptionBlocks(newBlocks...))
+	if updateErr != nil {
+		log.Printf("Failed to update message in channel %s at %s: %v", callback.Channel.ID, callback.Message.Timestamp, updateErr)
+	}
+
+	// Record acknowledgment in the database
+	if ticketID > 0 && s.DB != nil {
+		ackEntry := models.AcknowledgmentLog{
+			TicketID:      ticketID,
+			SlackUserID:   slackUserID,
+			SlackUserName: callback.User.Name,
+		}
+		if alertLog, err := models.GetMostRecentAlertLogByTicketID(s.DB, ticketID); err == nil {
+			ackEntry.AlertLogID = &alertLog.ID
+		}
+		if err := models.CreateAcknowledgmentLog(context.Background(), s.DB, ackEntry); err != nil {
+			log.Printf("HandleAcknowledge: failed to record acknowledgment for ticket %d: %v", ticketID, err)
+		}
 	}
 }
 
@@ -423,6 +438,15 @@ func (s *SlackService) SendSlackMessageWithClient(channelID, alertType, slaLabel
 
 	log.Printf("Message successfully sent to channel %s at %s", channelID, timestamp)
 	logging.Debug(logging.AreaSlack, "SendSlackMessage: SUCCESS - channel=%s timestamp=%s", channelID, timestamp)
+	return nil
+}
+
+// PostBlockMessage posts a Block Kit message to the given channel.
+func (s *SlackService) PostBlockMessage(channelID string, blocks ...slack.Block) error {
+	_, _, err := s.client.PostMessage(channelID, slack.MsgOptionBlocks(blocks...))
+	if err != nil {
+		return fmt.Errorf("failed to post block message: %w", err)
+	}
 	return nil
 }
 

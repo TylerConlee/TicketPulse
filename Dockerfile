@@ -31,6 +31,10 @@ COPY --from=builder /app/ticketpulse .
 COPY --from=builder /app/templates ./templates
 COPY --from=builder /app/static ./static
 
+# Create the data directory for the SQLite database volume mount
+RUN mkdir /data && chown appuser:appuser /data
+VOLUME /data
+
 # Expose the application port
 EXPOSE 8080
 

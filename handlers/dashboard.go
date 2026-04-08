@@ -52,20 +52,16 @@ func (h *AppHandler) DashboardHandler(w http.ResponseWriter, r *http.Request, da
 		return
 	}
 
-	// Render the dashboard template with the processed data
+	data["AlertData"] = stats
+	data["HasNewTicketData"] = len(newTicketData) > 0
+	data["HasTicketUpdateData"] = len(ticketUpdateData) > 0
+	data["HasSlaDeadlineData"] = len(slaDeadlineData) > 0
+	data["NewTicketData"] = template.JS(newTicketDataJSON)
+	data["SlaDeadlineData"] = template.JS(slaDeadlineDataJSON)
+	data["TicketUpdateData"] = template.JS(ticketUpdateDataJSON)
+
 	t := template.Must(template.New("layout.html").Funcs(funcMap).ParseFiles("templates/layout.html", "templates/dashboard.html"))
-	if err := t.ExecuteTemplate(w, "layout.html", map[string]interface{}{
-		"Title":               data["Title"],
-		"AlertData":           stats,
-		"User":                data["User"],
-		"HasNewTicketData":    len(newTicketData) > 0,
-		"HasTicketUpdateData": len(ticketUpdateData) > 0,
-		"HasSlaDeadlineData":  len(slaDeadlineData) > 0,
-		"NewTicketData":       template.JS(newTicketDataJSON),
-		"SlaDeadlineData":     template.JS(slaDeadlineDataJSON),
-		"TicketUpdateData":    template.JS(ticketUpdateDataJSON),
-		"Notifications":       data["Notifications"],
-	}); err != nil {
+	if err := t.ExecuteTemplate(w, "layout.html", data); err != nil {
 		log.Printf("Error rendering template: %v", err)
 		http.Error(w, "Unable to render template", http.StatusInternalServerError)
 		return

@@ -8,7 +8,7 @@
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
       History
     </a>
-    <button onclick="openAddModal()" class="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
+    <button id="openAddModalBtn" class="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
       Add Alert
     </button>
@@ -18,7 +18,7 @@
 <!-- Bulk action bar (hidden by default) -->
 <div id="bulkBar" class="hidden mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between">
   <span class="text-sm text-blue-700"><span id="bulkCount">0</span> alert(s) selected</span>
-  <form method="POST" action="/alerts/bulk-delete" id="bulkDeleteForm" onsubmit="return confirm('Delete selected alerts?');">
+  <form method="POST" action="/alerts/bulk-delete" id="bulkDeleteForm">
     {{$.CSRFField}}
     <div id="bulkIdsContainer"></div>
     <button type="submit" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors">
@@ -68,8 +68,8 @@
                 {{else}}bg-gray-50 text-gray-700{{end}}">{{.AlertType}}</span>
             </td>
             <td class="px-6 py-3 text-right view-cell">
-              <button onclick="startEdit(this.closest('tr'))" class="text-gray-500 hover:text-brand-600 text-sm font-medium transition-colors mr-2">Edit</button>
-              <form method="POST" action="/alerts/delete/{{.ID}}" onsubmit="return confirm('Delete this alert?');" class="inline">
+              <button class="edit-btn text-gray-500 hover:text-brand-600 text-sm font-medium transition-colors mr-2">Edit</button>
+              <form method="POST" action="/alerts/delete/{{.ID}}" class="inline delete-confirm-form">
                 {{$.CSRFField}}
                 <button type="submit" class="text-red-600 hover:text-red-800 text-sm font-medium transition-colors">Delete</button>
               </form>
@@ -95,7 +95,7 @@
                   <option value="ticket_update" {{if eq .AlertType "ticket_update"}}selected{{end}}>Ticket Update</option>
                 </select>
                 <button type="submit" class="px-3 py-1.5 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">Save</button>
-                <button type="button" onclick="cancelEdit(this.closest('tr'))" class="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+                <button type="button" class="cancel-edit-btn px-3 py-1.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
               </form>
             </td>
           </tr>
@@ -111,7 +111,7 @@
   <div class="px-6 py-16 text-center">
     <svg class="w-12 h-12 text-gray-300 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
     <p class="text-gray-500 text-sm mb-4">No alerts configured yet. Create your first alert to start receiving Slack notifications.</p>
-    <button onclick="openAddModal()" class="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
+    <button id="openAddModalEmptyBtn" class="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
       Add Your First Alert
     </button>
@@ -124,7 +124,7 @@
   <div class="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 flex flex-col">
     <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
       <h3 class="text-sm font-semibold text-gray-900">Add Tag Alert</h3>
-      <button onclick="closeAddModal()" class="p-1 rounded-lg hover:bg-gray-100 transition-colors">
+      <button id="closeAddModalBtn" class="p-1 rounded-lg hover:bg-gray-100 transition-colors">
         <svg class="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -178,7 +178,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{$.CSPNonce}}">
 var slackChannels = [{{range $i, $ch := .SlackChannels}}{{if $i}},{{end}}{"id":"{{$ch.ID}}","name":"{{$ch.Name}}"}{{end}}];
 
 function openAddModal() {
@@ -290,8 +290,48 @@ function cancelEdit(row) {
   }
 })();
 
-// Bulk selection
+// Event listener bindings (CSP-safe, no inline handlers)
 document.addEventListener('DOMContentLoaded', function() {
+  // Open modal buttons
+  var openBtn = document.getElementById('openAddModalBtn');
+  if (openBtn) openBtn.addEventListener('click', openAddModal);
+
+  var openEmptyBtn = document.getElementById('openAddModalEmptyBtn');
+  if (openEmptyBtn) openEmptyBtn.addEventListener('click', openAddModal);
+
+  var closeBtn = document.getElementById('closeAddModalBtn');
+  if (closeBtn) closeBtn.addEventListener('click', closeAddModal);
+
+  // Bulk delete confirm
+  var bulkForm = document.getElementById('bulkDeleteForm');
+  if (bulkForm) {
+    bulkForm.addEventListener('submit', function(e) {
+      if (!confirm('Delete selected alerts?')) e.preventDefault();
+    });
+  }
+
+  // Edit / Cancel / Delete confirm buttons (delegated)
+  document.addEventListener('click', function(e) {
+    var editBtn = e.target.closest('.edit-btn');
+    if (editBtn) {
+      startEdit(editBtn.closest('tr'));
+      return;
+    }
+    var cancelBtn = e.target.closest('.cancel-edit-btn');
+    if (cancelBtn) {
+      cancelEdit(cancelBtn.closest('tr'));
+      return;
+    }
+  });
+
+  // Delete confirm forms
+  document.querySelectorAll('.delete-confirm-form').forEach(function(form) {
+    form.addEventListener('submit', function(e) {
+      if (!confirm('Delete this alert?')) e.preventDefault();
+    });
+  });
+
+  // Bulk selection
   var checkboxes = document.querySelectorAll('.bulk-checkbox');
   var bulkBar = document.getElementById('bulkBar');
   var bulkCount = document.getElementById('bulkCount');

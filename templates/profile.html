@@ -41,7 +41,7 @@
         <button type="submit" class="inline-flex items-center px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-colors">Save Settings</button>
       </form>
       <div class="mt-4 pt-4 border-t border-gray-100">
-        <button id="getSummaryNowBtn" onclick="fetchSummaryNow()" class="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">
+        <button id="getSummaryNowBtn" class="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
           Get Summary Now
         </button>
@@ -163,18 +163,18 @@
   <div class="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
     <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
       <h3 class="text-sm font-semibold text-gray-900">Daily Summary</h3>
-      <button onclick="closeSummaryModal()" class="p-1 rounded-lg hover:bg-gray-100 transition-colors">
+      <button class="close-summary-modal p-1 rounded-lg hover:bg-gray-100 transition-colors">
         <svg class="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
     <div id="summaryModalContent" class="p-6 overflow-y-auto text-sm text-gray-700">Loading...</div>
     <div class="px-6 py-3 border-t border-gray-100 flex justify-end">
-      <button onclick="closeSummaryModal()" class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">Close</button>
+      <button class="close-summary-modal px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">Close</button>
     </div>
   </div>
 </div>
 
-<script>
+<script nonce="{{$.CSPNonce}}">
 document.addEventListener('DOMContentLoaded', function() {
   // Work days checkbox logic
   const checkboxes = document.querySelectorAll('.work-day-checkbox');
@@ -209,9 +209,16 @@ function fetchSummaryNow() {
 }
 
 function closeSummaryModal() {
-  const modal = document.getElementById('summaryModal');
+  var modal = document.getElementById('summaryModal');
   modal.classList.add('hidden');
   modal.classList.remove('flex');
 }
+
+var summaryBtn = document.getElementById('getSummaryNowBtn');
+if (summaryBtn) summaryBtn.addEventListener('click', fetchSummaryNow);
+
+document.querySelectorAll('.close-summary-modal').forEach(function(btn) {
+  btn.addEventListener('click', closeSummaryModal);
+});
 </script>
 {{end}}
